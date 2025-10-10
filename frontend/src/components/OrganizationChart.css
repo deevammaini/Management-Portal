@@ -1,0 +1,595 @@
+/* Organization Chart Styles */
+.org-chart-container {
+  overflow-x: auto;
+  padding: 20px;
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+  border-radius: 12px;
+  min-height: 600px;
+}
+
+.org-chart {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 1200px;
+  position: relative;
+  padding: 40px 0;
+  gap: 20px;
+}
+
+.org-level {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  margin: 30px 0;
+  position: relative;
+  width: 100%;
+}
+
+.org-level.level-0 {
+  margin-top: 0;
+  margin-bottom: 50px;
+}
+
+.org-level.level-1 {
+  margin: 40px 0;
+}
+
+.org-level.level-2 {
+  margin: 30px 0;
+}
+
+.org-level.level-3 {
+  margin: 20px 0;
+}
+
+.org-node {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  padding: 20px;
+  margin: 0 15px;
+  min-width: 220px;
+  max-width: 280px;
+  position: relative;
+  transition: all 0.3s ease;
+  border: 2px solid transparent;
+  z-index: 2;
+}
+
+.org-node:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+}
+
+/* CEO Node */
+.ceo-node {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  color: white;
+  border-color: #dc2626;
+  transform: scale(1.15);
+  box-shadow: 0 8px 25px -5px rgba(220, 38, 38, 0.4);
+  margin: 0 25px;
+  min-width: 250px;
+  max-width: 320px;
+}
+
+.ceo-node .node-avatar {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.ceo-node .avatar-text {
+  color: white;
+  font-weight: bold;
+}
+
+.ceo-node .node-name {
+  color: white;
+  font-weight: bold;
+}
+
+.ceo-node .node-position {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.ceo-node .node-department {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* VP Nodes */
+.vp-node {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  color: white;
+  border-color: #1d4ed8;
+  transform: scale(1.05);
+  box-shadow: 0 6px 20px -4px rgba(29, 78, 216, 0.3);
+  margin: 0 20px;
+  min-width: 240px;
+  max-width: 300px;
+}
+
+.vp-node .node-avatar {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.vp-node .avatar-text {
+  color: white;
+  font-weight: bold;
+}
+
+.vp-node .node-name {
+  color: white;
+  font-weight: bold;
+}
+
+.vp-node .node-position {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.vp-node .node-department {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Director Nodes */
+.director-node {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  color: white;
+  border-color: #059669;
+}
+
+.director-node .node-avatar {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.director-node .avatar-text {
+  color: white;
+  font-weight: bold;
+}
+
+.director-node .node-name {
+  color: white;
+  font-weight: bold;
+}
+
+.director-node .node-position {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.director-node .node-department {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Employee Nodes */
+.employee-node {
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  color: white;
+  border-color: #7c3aed;
+}
+
+.employee-node .node-avatar {
+  background: rgba(255, 255, 255, 0.2);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.employee-node .avatar-text {
+  color: white;
+  font-weight: bold;
+}
+
+.employee-node .node-name {
+  color: white;
+  font-weight: bold;
+}
+
+.employee-node .node-position {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.employee-node .node-department {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Node Avatar */
+.node-avatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 12px;
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  border: 2px solid rgba(59, 130, 246, 0.3);
+}
+
+.avatar-text {
+  font-size: 18px;
+  font-weight: bold;
+  color: white;
+}
+
+/* Node Info */
+.node-info {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.node-name {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: #1f2937;
+}
+
+.node-position {
+  font-size: 14px;
+  color: #6b7280;
+  margin-bottom: 2px;
+}
+
+.node-department {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+/* Node Actions */
+.node-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.org-node:hover .node-actions {
+  opacity: 1;
+}
+
+/* Expand Button */
+.expand-button {
+  position: absolute;
+  top: 50%;
+  right: -20px;
+  transform: translateY(-50%);
+  z-index: 10;
+}
+
+.expand-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.expand-btn:hover {
+  background: #f3f4f6;
+  border-color: #3b82f6;
+  transform: scale(1.1);
+}
+
+.expand-btn svg {
+  color: #6b7280;
+  transition: color 0.3s ease;
+}
+
+.expand-btn:hover svg {
+  color: #3b82f6;
+}
+
+/* VP Level Layout */
+.vp-level {
+  margin-top: 40px;
+  width: 100%;
+}
+
+.level-header {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.vp-container {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 40px;
+  flex-wrap: wrap;
+}
+
+.vp-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  min-width: 200px;
+}
+
+/* Directors Container */
+.directors-container {
+  margin-top: 30px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.directors-list {
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 30px;
+  width: 100%;
+  flex-wrap: wrap;
+  margin: 0 auto;
+}
+
+.director-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 200px;
+  max-width: 250px;
+  margin: 0 10px;
+}
+
+.director-item .org-node {
+  margin: 0;
+  min-width: 200px;
+  max-width: 250px;
+}
+
+/* Team Members Container */
+.team-members-container {
+  margin-top: 20px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Force horizontal layout for team members */
+.team-members-list {
+  display: block !important;
+  text-align: center !important;
+  width: 100% !important;
+  margin: 0 auto !important;
+  white-space: nowrap !important;
+}
+
+.team-members-list .org-node {
+  margin: 0 !important;
+  min-width: 180px !important;
+  max-width: 220px !important;
+  flex: 0 0 auto !important;
+  display: inline-block !important;
+  float: none !important;
+  clear: none !important;
+}
+
+/* Additional override for any conflicting styles */
+.team-members-container .team-members-list .org-node {
+  margin: 0 !important;
+  min-width: 180px !important;
+  max-width: 220px !important;
+  flex: 0 0 auto !important;
+  display: inline-block !important;
+  float: none !important;
+  clear: none !important;
+  width: auto !important;
+}
+
+/* Team member item wrapper for horizontal layout */
+.team-member-item {
+  display: inline-block !important;
+  margin: 0 10px !important;
+  vertical-align: top !important;
+  flex: 0 0 auto !important;
+}
+
+/* Override the default org-node margin for team members */
+.team-members-list .org-node {
+  margin: 0 !important;
+  min-width: 180px !important;
+  max-width: 220px !important;
+}
+
+/* Connection Lines for VP Layout */
+.vp-column::before {
+  content: '';
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 30px;
+  background: #cbd5e1;
+  z-index: 1;
+}
+
+.directors-container::before {
+  content: '';
+  position: absolute;
+  top: -15px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 2px;
+  height: 15px;
+  background: #cbd5e1;
+  z-index: 1;
+}
+
+/* Horizontal line connecting VPs */
+.vp-container::before {
+  content: '';
+  position: absolute;
+  top: -15px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #cbd5e1;
+  z-index: 1;
+}
+
+.action-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.edit-btn {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+.edit-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+  transform: scale(1.1);
+}
+
+.delete-btn {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.delete-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  transform: scale(1.1);
+}
+
+/* Connection Lines */
+.org-level::before {
+  content: '';
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 30px;
+  background: #94a3b8;
+  z-index: 1;
+}
+
+.org-level:first-child::before {
+  display: none;
+}
+
+.org-node::before {
+  content: '';
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 30px;
+  background: #94a3b8;
+  z-index: 1;
+}
+
+.org-level:first-child .org-node::before {
+  display: none;
+}
+
+/* Horizontal connection lines for multiple nodes at same level */
+.org-level:not(:first-child)::after {
+  content: '';
+  position: absolute;
+  top: -15px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #94a3b8;
+  z-index: 1;
+}
+
+.org-level:first-child::after {
+  display: none;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .org-chart-container {
+    padding: 10px;
+  }
+  
+  .org-chart {
+    min-width: 800px;
+  }
+  
+  .org-node {
+    min-width: 150px;
+    max-width: 180px;
+    padding: 12px;
+  }
+  
+  .node-avatar {
+    width: 40px;
+    height: 40px;
+  }
+  
+  .avatar-text {
+    font-size: 14px;
+  }
+  
+  .node-name {
+    font-size: 14px;
+  }
+  
+  .node-position {
+    font-size: 12px;
+  }
+  
+  .node-department {
+    font-size: 10px;
+  }
+}
+
+/* Animation for new nodes */
+@keyframes slideInFromTop {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.org-node {
+  animation: slideInFromTop 0.5s ease-out;
+}
+
+/* Level-specific animations */
+.level-0 .org-node {
+  animation-delay: 0s;
+}
+
+.level-1 .org-node {
+  animation-delay: 0.1s;
+}
+
+.level-2 .org-node {
+  animation-delay: 0.2s;
+}
+
+.level-3 .org-node {
+  animation-delay: 0.3s;
+}
