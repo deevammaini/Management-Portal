@@ -1133,139 +1133,57 @@ def register_vendor_detailed():
     try:
         data = request.get_json()
         
-        # Extract all comprehensive fields
+        # Debug: Print received data
+        print(f"Received registration data: {data}")
+        
+        # Extract basic fields that match the current table structure
         company_name = data.get('companyName')
-        company_type = data.get('companyType')
-        proprietor_photo = data.get('proprietorPhoto')
+        contact_person = data.get('contactPersonName') or data.get('contactPerson')
+        email = data.get('emailAddress') or data.get('email')
+        phone = data.get('mobileNumber') or data.get('phone')
+        address = data.get('communicationAddress') or data.get('address')
+        business_type = data.get('companyType') or data.get('businessType')
+        services = data.get('coreBusinessActivity') or data.get('services')
+        experience = data.get('typeOfActivity') or data.get('experience')
+        certifications = data.get('qualityCertifications') or data.get('certifications', '')
+        vendor_references = data.get('majorCustomers') or data.get('references', '')
         
-        contact_person_name = data.get('contactPersonName')
-        contact_person_designation = data.get('contactPersonDesignation')
-        visiting_card = data.get('visitingCard')
-        
-        communication_address = data.get('communicationAddress')
-        registered_office_address = data.get('registeredOfficeAddress')
-        
-        office_phone = data.get('officePhone')
-        office_fax = data.get('officeFax')
-        mobile_number = data.get('mobileNumber')
-        email_address = data.get('emailAddress')
-        
-        core_business_activity = data.get('coreBusinessActivity')
-        type_of_activity = data.get('typeOfActivity')
-        preferred_geographic_areas = data.get('preferredGeographicAreas')
-        date_of_establishment = data.get('dateOfEstablishment')
-        locally_registered = data.get('locallyRegistered')
-        
-        bank_name = data.get('bankName')
-        bank_branch = data.get('bankBranch')
-        bank_address = data.get('bankAddress')
-        bank_tel_no = data.get('bankTelNo')
-        account_holder_name = data.get('accountHolderName')
-        account_number = data.get('accountNumber')
-        account_type = data.get('accountType')
-        rtgs_code = data.get('rtgsCode')
-        credit_limit = data.get('creditLimit')
-        od_limit = data.get('odLimit')
-        bg_limit = data.get('bgLimit')
-        lc_limit = data.get('lcLimit')
-        nrc_passport_no = data.get('nrcPassportNo')
-        
-        major_customers = data.get('majorCustomers')
-        services_to_existing_clients = data.get('servicesToExistingClients')
-        
-        # Business turnover data
-        turnover_data = {
-            'year1': data.get('turnoverYear1'),
-            'year2': data.get('turnoverYear2'),
-            'year3': data.get('turnoverYear3')
-        }
-        
-        # Previous work data
-        previous_work_data = {
-            'year1': data.get('previousWorkYear1'),
-            'year2': data.get('previousWorkYear2'),
-            'year3': data.get('previousWorkYear3')
-        }
-        
-        quality_certifications = data.get('qualityCertifications')
-        certificate_of_incorporation = data.get('certificateOfIncorporation')
-        fcci_registration = data.get('fcciRegistration')
-        other_registration_numbers = data.get('otherRegistrationNumbers')
-        
-        # Manpower details
-        manpower_data = {
-            'total_teams': data.get('totalTeamsAvailable'),
-            'teams_for_yellowstone': data.get('teamsForYellowStone'),
-            'persons_per_team': data.get('personsPerTeam'),
-            'parallel_teams': data.get('parallelTeamsDeployable'),
-            'additional_teams': data.get('additionalTeamsArrangable')
-        }
-        
-        sites_executable_per_year = data.get('sitesExecutablePerYear')
-        machinery_tools_available = data.get('machineryToolsAvailable')
-        machinery_tools_period = data.get('machineryToolsPeriod')
-        
-        normal_working_hours = data.get('normalWorkingHours')
-        work_additional_hours = data.get('workAdditionalHours')
-        work_on_holidays = data.get('workOnHolidays')
-        
-        # Organization details
-        organization_data = {
-            'management_team': data.get('managementTeam'),
-            'project_manager': data.get('projectManagerName'),
-            'technical_team': data.get('technicalTeam'),
-            'commercial_team': data.get('commercialTeam')
-        }
-        
-        # Declaration
-        signing_authority_name = data.get('signingAuthorityName')
-        signing_authority_designation = data.get('signingAuthorityDesignation')
-        company_seal = data.get('companySeal')
+        # Debug: Print extracted fields
+        print(f"Extracted fields - Company: {company_name}, Contact: {contact_person}, Email: {email}")
         
         # Validate required fields
         required_fields = [
-            company_name, contact_person_name, email_address, mobile_number,
-            communication_address, core_business_activity, type_of_activity
+            company_name, contact_person, email, phone, address, business_type, services, experience
         ]
         
         if not all(required_fields):
-            return jsonify({'error': 'All required fields must be filled'}), 400
+            missing_fields = [field for field, value in zip(['company_name', 'contact_person', 'email', 'phone', 'address', 'business_type', 'services', 'experience'], required_fields) if not value]
+            print(f"Missing required fields: {missing_fields}")
+            return jsonify({'error': f'Missing required fields: {", ".join(missing_fields)}'}), 400
         
         # Check if vendor already exists
-        check_query = "SELECT id FROM vendor_registrations WHERE email_address = %s OR email = %s"
-        existing = execute_query(check_query, (email_address, email_address), fetch_one=True)
+        check_query = "SELECT id FROM vendor_registrations WHERE email = %s"
+        existing = execute_query(check_query, (email,), fetch_one=True)
         
         if existing:
+            print(f"Vendor with email {email} already exists")
             return jsonify({'error': 'Vendor with this email already registered'}), 400
         
-        # Insert comprehensive vendor registration
+        # Insert vendor registration with current table structure
         insert_query = """
         INSERT INTO vendor_registrations 
         (company_name, contact_person, email, phone, address, business_type, 
-         services, experience, certifications, vendor_references, status, created_at,
-         company_type, contact_person_name, contact_person_designation, communication_address,
-         registered_office_address, office_phone, office_fax, mobile_number, email_address,
-         core_business_activity, type_of_activity, preferred_geographic_areas, date_of_establishment,
-         locally_registered, bank_name, bank_branch, account_holder_name, account_number,
-         account_type, rtgs_code, nrc_passport_no, major_customers, services_to_existing_clients,
-         quality_certifications, fcci_registration, other_registration_numbers, normal_working_hours,
-         work_additional_hours, work_on_holidays, signing_authority_name, signing_authority_designation)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW(),
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+         services, experience, certifications, vendor_references, status, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW())
         """
         
+        print(f"Executing insert query with data: {company_name}, {contact_person}, {email}")
         execute_query(insert_query, (
-            company_name, contact_person_name, email_address, mobile_number, communication_address,
-            company_type, core_business_activity, type_of_activity, quality_certifications, major_customers,
-            company_type, contact_person_name, contact_person_designation, communication_address,
-            registered_office_address, office_phone, office_fax, mobile_number, email_address,
-            core_business_activity, type_of_activity, preferred_geographic_areas, date_of_establishment,
-            locally_registered, bank_name, bank_branch, account_holder_name, account_number,
-            account_type, rtgs_code, nrc_passport_no, major_customers, services_to_existing_clients,
-            quality_certifications, fcci_registration, other_registration_numbers, normal_working_hours,
-            work_additional_hours, work_on_holidays, signing_authority_name, signing_authority_designation
+            company_name, contact_person, email, phone, address, business_type,
+            services, experience, certifications, vendor_references
         ))
         
+        print(f"Successfully inserted vendor registration for {company_name}")
         return jsonify({
             'success': True,
             'message': 'Comprehensive vendor registration submitted successfully. You will receive an email once approved.'
@@ -1273,6 +1191,8 @@ def register_vendor_detailed():
         
     except Exception as e:
         print(f"Vendor registration error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': 'Failed to submit vendor registration'}), 500
 
 # Admin API endpoints for vendor registration management

@@ -234,7 +234,7 @@ const AdminDashboard = ({ user, onLogout }) => {
 
         {/* User Info */}
         <div className="p-4 border-t bg-gray-50">
-          <div className="flex items-center gap-3 mb-3">
+          <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-purple-400 to-purple-600 rounded-lg flex items-center justify-center">
               <span className="text-white text-sm font-bold">A</span>
             </div>
@@ -243,18 +243,6 @@ const AdminDashboard = ({ user, onLogout }) => {
               <p className="text-xs text-gray-500">Administrator</p>
             </div>
           </div>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => setShowSettings(true)}
-                    className="flex-1 p-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors"
-                    title="Settings"
-                  >
-                    <Settings size={16} />
-                  </button>
-                  <button onClick={onLogout} className="flex-1 p-2 text-gray-600 hover:bg-gray-200 rounded-lg transition-colors" title="Logout">
-                    <LogOut size={16} />
-                  </button>
-                </div>
         </div>
       </div>
 
@@ -282,6 +270,27 @@ const AdminDashboard = ({ user, onLogout }) => {
               </div>
               
               <div className="flex items-center gap-4">
+                {/* Logout Button */}
+                <button 
+                  onClick={() => {
+                    console.log('Logout button clicked');
+                    if (onLogout) {
+                      onLogout();
+                    } else {
+                      console.warn('onLogout prop not provided');
+                      // Fallback logout functionality
+                      localStorage.removeItem('token');
+                      window.location.href = '/login';
+                    }
+                  }} 
+                  className="flex items-center gap-2 px-4 py-2 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors text-sm font-medium"
+                  title="Logout"
+                >
+                  <LogOut size={16} />
+                  Logout
+                </button>
+                
+                {/* Notifications */}
                 <div className="relative">
                   <button 
                     onClick={() => setShowNotifications(!showNotifications)}
