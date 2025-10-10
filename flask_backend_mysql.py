@@ -1107,6 +1107,71 @@ def get_all_attendance():
         print(f"Get all attendance error: {e}")
         return jsonify({'error': 'Failed to get attendance records'}), 500
 
+# Vendor Registration API endpoints
+@app.route('/api/vendor/register', methods=['POST'])
+def register_vendor_detailed():
+    """Register vendor for full portal access"""
+    try:
+        data = request.get_json()
+        
+        company_name = data.get('companyName')
+        contact_person = data.get('contactPerson')
+        email = data.get('email')
+        phone = data.get('phone')
+        address = data.get('address')
+        business_type = data.get('businessType')
+        services = data.get('services')
+        experience = data.get('experience')
+        certifications = data.get('certifications', '')
+        vendor_references = data.get('references', '')
+        
+        if not all([company_name, contact_person, email, phone, address, business_type, services, experience]):
+            return jsonify({'error': 'All required fields must be filled'}), 400
+        
+        # Check if vendor already exists
+        check_query = "SELECT id FROM vendor_registrations WHERE email = %s"
+        existing = execute_query(check_query, (email,), fetch_one=True)
+        
+        if existing:
+            return jsonify({'error': 'Vendor with this email already registered'}), 400
+        
+        # Insert vendor registration
+        insert_query = """
+        INSERT INTO vendor_registrations 
+        (company_name, contact_person, email, phone, address, business_type, 
+         services, experience, certifications, vendor_references, status, created_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW())
+        """
+        
+        execute_query(insert_query, (
+            company_name, contact_person, email, phone, address, business_type,
+            services, experience, certifications, vendor_references
+        ))
+        
+        return jsonify({
+            'success': True,
+            'message': 'Vendor registration submitted successfully. You will receive an email once approved.'
+        })
+        
+    except Exception as e:
+        print(f"Vendor registration error: {e}")
+        return jsonify({'error': 'Failed to submit vendor registration'}), 500
+
+@app.route('/api/vendor/dashboard-data', methods=['GET'])
+def get_vendor_dashboard_data():
+    """Get vendor dashboard data"""
+    try:
+        # For now, return mock data
+        return jsonify({
+            'success': True,
+            'ndaStatus': 'completed',
+            'registrationStatus': 'pending'
+        })
+        
+    except Exception as e:
+        print(f"Get vendor dashboard data error: {e}")
+        return jsonify({'error': 'Failed to get vendor dashboard data'}), 500
+
 # Organization Management API endpoints
 @app.route('/api/admin/employees', methods=['GET'])
 def get_all_employees():

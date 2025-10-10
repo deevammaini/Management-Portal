@@ -239,4 +239,283 @@ const VendorPortal = ({ user, onLogout }) => {
                   <span className="text-sm text-gray-500">2 days ago</span>
                 </div>
                 {registrationStatus === 'submitted' && (
-                  <div className="flex items-center g
+                  <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-lg">
+                    <UserPlus className="text-blue-500" size={20} />
+                    <div className="flex-1">
+                      <p className="font-medium">Registration Submitted</p>
+                      <p className="text-sm text-gray-500">Your vendor registration has been submitted for review</p>
+                    </div>
+                    <span className="text-sm text-gray-500">1 day ago</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'registration' && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold">Vendor Registration</h2>
+              {registrationStatus === 'pending' && (
+                <button
+                  onClick={() => setShowRegistrationForm(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+                >
+                  <UserPlus size={20} />
+                  Complete Registration
+                </button>
+              )}
+            </div>
+
+            {registrationStatus === 'pending' && (
+              <div className="bg-white rounded-xl shadow-sm border p-6">
+                <div className="text-center py-12">
+                  <UserPlus className="mx-auto text-gray-300 mb-4" size={48} />
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Complete Your Registration</h3>
+                  <p className="text-gray-600 mb-6">
+                    Fill out the vendor registration form to get full access to our portal
+                  </p>
+                  <button
+                    onClick={() => setShowRegistrationForm(true)}
+                    className="px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium"
+                  >
+                    Start Registration
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {registrationStatus === 'submitted' && (
+              <div className="bg-white rounded-xl shadow-sm border p-6">
+                <div className="text-center py-12">
+                  <Clock className="mx-auto text-amber-500 mb-4" size={48} />
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Registration Under Review</h3>
+                  <p className="text-gray-600 mb-6">
+                    Your registration has been submitted and is currently under review
+                  </p>
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 max-w-md mx-auto">
+                    <p className="text-sm text-amber-800">
+                      <strong>Status:</strong> Under Review<br/>
+                      <strong>Expected Time:</strong> 2-3 business days<br/>
+                      <strong>Contact:</strong> vendor-support@yellowstonexps.com
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {registrationStatus === 'approved' && (
+              <div className="bg-white rounded-xl shadow-sm border p-6">
+                <div className="text-center py-12">
+                  <CheckCircle className="mx-auto text-green-500 mb-4" size={48} />
+                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Registration Approved!</h3>
+                  <p className="text-gray-600 mb-6">
+                    Congratulations! Your registration has been approved
+                  </p>
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-4 max-w-md mx-auto">
+                    <p className="text-sm text-green-800">
+                      <strong>Status:</strong> Approved<br/>
+                      <strong>Access Level:</strong> Full Portal Access<br/>
+                      <strong>Approved On:</strong> {new Date().toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'nda' && (
+          <div className="space-y-6">
+            <h2 className="text-2xl font-bold">NDA Status</h2>
+            
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center">
+                  <CheckCircle className="text-green-600" size={32} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold mb-1">Status: COMPLETED</h3>
+                  <p className="text-gray-600">
+                    Your NDA has been successfully completed and approved
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <p className="text-sm text-green-800">
+                  <strong>NDA Details:</strong><br/>
+                  • Agreement Type: Non-Disclosure Agreement<br/>
+                  • Status: Completed and Approved<br/>
+                  • Completion Date: {new Date().toLocaleDateString()}<br/>
+                  • Reference Number: NDA-{Math.random().toString(36).substr(2, 9).toUpperCase()}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* Registration Form Modal */}
+      {showRegistrationForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6 border-b">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold">Vendor Registration Form</h3>
+                <button
+                  onClick={() => setShowRegistrationForm(false)}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Company Name *</label>
+                  <input
+                    type="text"
+                    value={registrationForm.companyName}
+                    onChange={(e) => handleInputChange('companyName', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="Enter company name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Contact Person *</label>
+                  <input
+                    type="text"
+                    value={registrationForm.contactPerson}
+                    onChange={(e) => handleInputChange('contactPerson', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="Enter contact person name"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
+                  <input
+                    type="email"
+                    value={registrationForm.email}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="Enter email address"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
+                  <input
+                    type="tel"
+                    value={registrationForm.phone}
+                    onChange={(e) => handleInputChange('phone', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    placeholder="Enter phone number"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Address *</label>
+                <textarea
+                  value={registrationForm.address}
+                  onChange={(e) => handleInputChange('address', e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder="Enter company address"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Business Type *</label>
+                  <select
+                    value={registrationForm.businessType}
+                    onChange={(e) => handleInputChange('businessType', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  >
+                    <option value="">Select business type</option>
+                    <option value="IT Services">IT Services</option>
+                    <option value="Consulting">Consulting</option>
+                    <option value="Manufacturing">Manufacturing</option>
+                    <option value="Logistics">Logistics</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Years of Experience *</label>
+                  <select
+                    value={registrationForm.experience}
+                    onChange={(e) => handleInputChange('experience', e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  >
+                    <option value="">Select experience</option>
+                    <option value="1-2 years">1-2 years</option>
+                    <option value="3-5 years">3-5 years</option>
+                    <option value="6-10 years">6-10 years</option>
+                    <option value="10+ years">10+ years</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Services Offered *</label>
+                <textarea
+                  value={registrationForm.services}
+                  onChange={(e) => handleInputChange('services', e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder="Describe the services you offer"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Certifications</label>
+                <textarea
+                  value={registrationForm.certifications}
+                  onChange={(e) => handleInputChange('certifications', e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder="List any relevant certifications"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">References</label>
+                <textarea
+                  value={registrationForm.references}
+                  onChange={(e) => handleInputChange('references', e.target.value)}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  placeholder="Provide references from previous clients"
+                />
+              </div>
+            </div>
+            
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button
+                onClick={() => setShowRegistrationForm(false)}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRegistrationSubmit}
+                className="px-6 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium"
+              >
+                Submit Registration
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default VendorPortal;
