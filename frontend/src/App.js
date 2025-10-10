@@ -4,6 +4,7 @@ import RegistrationScreen from './components/RegistrationScreen';
 import AdminDashboard from './components/AdminDashboard';
 import EmployeeDashboard from './components/EmployeeDashboard';
 import VendorPortal from './components/VendorPortal';
+import VendorPortalFullAccess from './components/VendorPortalFullAccess';
 import { apiCall } from './utils/api';
 
 const App = () => {
@@ -71,7 +72,12 @@ const App = () => {
   } else if (user.userType === 'employee' || user.user_type === 'employee') {
     return <EmployeeDashboard user={user} onLogout={handleLogout} />;
   } else if (user.userType === 'vendor' || user.user_type === 'vendor') {
-    return <VendorPortal user={user} onLogout={handleLogout} />;
+    // Check if vendor has full access
+    if (user.has_full_access) {
+      return <VendorPortalFullAccess user={user} onLogout={handleLogout} />;
+    } else {
+      return <VendorPortal user={user} onLogout={handleLogout} />;
+    }
   }
 
   return <LoginScreen onLogin={handleLogin} onRegister={() => setShowRegistration(true)} />;

@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Users, FileText, CheckCircle, Bell, LogOut, Home, Briefcase,
-  BarChart3, Settings, Send, Download, Plus, TrendingUp, Menu, X, CheckSquare, Ticket
+  BarChart3, Settings, Send, Download, Plus, TrendingUp, Menu, X, CheckSquare, Ticket, ClipboardList
 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import StatsCard from './StatsCard';
 import Notification from './Notification';
 import AnalyticsView from './AnalyticsView';
 import VendorsView from './VendorsView';
+import RegistrationFormsView from './RegistrationFormsView';
 import FormsView from './FormsView';
 import NDAFormsView from './NDAFormsView';
 import SettingsView from './SettingsView';
@@ -203,6 +204,7 @@ const AdminDashboard = ({ user, onLogout }) => {
               { id: 'dashboard', label: 'Dashboard', icon: Home },
               { id: 'analytics', label: 'Analytics', icon: BarChart3 },
               { id: 'vendors', label: 'Vendors', icon: Users },
+              { id: 'registration-forms', label: 'Registration Forms', icon: ClipboardList },
               { id: 'forms', label: 'Forms', icon: FileText },
               { id: 'nda-forms', label: 'NDA Forms', icon: FileText },
               { id: 'tasks', label: 'Tasks', icon: CheckSquare },
@@ -432,6 +434,7 @@ const AdminDashboard = ({ user, onLogout }) => {
 
         {activeTab === 'analytics' && <AnalyticsView stats={stats} vendors={vendors} />}
         {activeTab === 'vendors' && <VendorsView vendors={vendors} onSendNDA={handleSendNDA} onReload={loadData} showNotification={showNotification} />}
+        {activeTab === 'registration-forms' && <RegistrationFormsView showNotification={showNotification} />}
         {activeTab === 'forms' && <FormsView forms={submittedForms} showNotification={showNotification} />}
         {activeTab === 'nda-forms' && <NDAFormsView showNotification={showNotification} />}
         {activeTab === 'tasks' && <TasksView showNotification={showNotification} />}

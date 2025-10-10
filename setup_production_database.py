@@ -193,6 +193,26 @@ def create_tables():
             )
         """)
         
+        # Create vendor_registrations table (if not exists)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS vendor_registrations (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                company_name VARCHAR(255) NOT NULL,
+                contact_person VARCHAR(255) NOT NULL,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                phone VARCHAR(20) NOT NULL,
+                address TEXT NOT NULL,
+                business_type VARCHAR(100) NOT NULL,
+                services TEXT NOT NULL,
+                experience TEXT NOT NULL,
+                certifications TEXT,
+                vendor_references TEXT,
+                status ENUM('pending', 'approved', 'declined') DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            )
+        """)
+        
         connection.commit()
         print("✅ All tables created successfully!")
         return True

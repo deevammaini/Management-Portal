@@ -488,8 +488,17 @@ def vendor_login():
         if not email or not password:
             return jsonify({'success': False, 'message': 'Email and password are required'}), 400
         
-        # Query vendor from vendor_logins table
-        query = "SELECT vl.*, v.company_name, v.contact_person FROM vendor_logins vl JOIN vendors v ON vl.vendor_id = v.id WHERE vl.email = %s AND vl.is_active = TRUE"
+        # Query vendor from vendor_logins table with approval status
+        query = """
+        SELECT vl.id, vl.vendor_id, vl.email, vl.password_hash, vl.company_name, vl.contact_person, 
+               vl.phone, vl.address, vl.is_active, vl.created_at, vl.last_login,
+               v.company_name as vendor_company, v.contact_person as vendor_contact, 
+               v.portal_access, v.nda_status, vr.status as registration_status
+        FROM vendor_logins vl 
+        JOIN vendors v ON vl.vendor_id = v.id 
+        LEFT JOIN vendor_registrations vr ON vr.email = vl.email
+        WHERE vl.email = %s AND vl.is_active = TRUE
+        """
         vendor = execute_query(query, (email,), fetch_one=True)
         
         if not vendor:
@@ -510,23 +519,33 @@ def vendor_login():
         # Update current user
         CURRENT_USER.update({
             'id': vendor['vendor_id'],
-            'name': vendor['company_name'],
+            'name': vendor['vendor_company'],
             'email': vendor['email'],
-            'company': vendor['company_name'],
-            'contact_person': vendor['contact_person'],
+            'company': vendor['vendor_company'],
+            'contact_person': vendor['vendor_contact'],
             'user_type': 'vendor'
         })
+        
+        # Determine access level based on approval status
+        has_full_access = (
+            vendor['portal_access'] == 1 and 
+            vendor['registration_status'] == 'approved'
+        )
         
         return jsonify({
             'success': True,
             'message': 'Login successful',
             'user': {
                 'id': vendor['vendor_id'],
-                'name': vendor['company_name'],
+                'name': vendor['vendor_company'],
                 'email': vendor['email'],
-                'company': vendor['company_name'],
-                'contact_person': vendor['contact_person'],
-                'user_type': 'vendor'
+                'company': vendor['vendor_company'],
+                'contact_person': vendor['vendor_contact'],
+                'user_type': 'vendor',
+                'has_full_access': has_full_access,
+                'portal_access': vendor['portal_access'],
+                'registration_status': vendor['registration_status'],
+                'nda_status': vendor['nda_status']
             }
         })
         
@@ -1110,52 +1129,346 @@ def get_all_attendance():
 # Vendor Registration API endpoints
 @app.route('/api/vendor/register', methods=['POST'])
 def register_vendor_detailed():
-    """Register vendor for full portal access"""
+    """Register vendor for full portal access with comprehensive YellowStone form data"""
     try:
         data = request.get_json()
         
+        # Extract all comprehensive fields
         company_name = data.get('companyName')
-        contact_person = data.get('contactPerson')
-        email = data.get('email')
-        phone = data.get('phone')
-        address = data.get('address')
-        business_type = data.get('businessType')
-        services = data.get('services')
-        experience = data.get('experience')
-        certifications = data.get('certifications', '')
-        vendor_references = data.get('references', '')
+        company_type = data.get('companyType')
+        proprietor_photo = data.get('proprietorPhoto')
         
-        if not all([company_name, contact_person, email, phone, address, business_type, services, experience]):
+        contact_person_name = data.get('contactPersonName')
+        contact_person_designation = data.get('contactPersonDesignation')
+        visiting_card = data.get('visitingCard')
+        
+        communication_address = data.get('communicationAddress')
+        registered_office_address = data.get('registeredOfficeAddress')
+        
+        office_phone = data.get('officePhone')
+        office_fax = data.get('officeFax')
+        mobile_number = data.get('mobileNumber')
+        email_address = data.get('emailAddress')
+        
+        core_business_activity = data.get('coreBusinessActivity')
+        type_of_activity = data.get('typeOfActivity')
+        preferred_geographic_areas = data.get('preferredGeographicAreas')
+        date_of_establishment = data.get('dateOfEstablishment')
+        locally_registered = data.get('locallyRegistered')
+        
+        bank_name = data.get('bankName')
+        bank_branch = data.get('bankBranch')
+        bank_address = data.get('bankAddress')
+        bank_tel_no = data.get('bankTelNo')
+        account_holder_name = data.get('accountHolderName')
+        account_number = data.get('accountNumber')
+        account_type = data.get('accountType')
+        rtgs_code = data.get('rtgsCode')
+        credit_limit = data.get('creditLimit')
+        od_limit = data.get('odLimit')
+        bg_limit = data.get('bgLimit')
+        lc_limit = data.get('lcLimit')
+        nrc_passport_no = data.get('nrcPassportNo')
+        
+        major_customers = data.get('majorCustomers')
+        services_to_existing_clients = data.get('servicesToExistingClients')
+        
+        # Business turnover data
+        turnover_data = {
+            'year1': data.get('turnoverYear1'),
+            'year2': data.get('turnoverYear2'),
+            'year3': data.get('turnoverYear3')
+        }
+        
+        # Previous work data
+        previous_work_data = {
+            'year1': data.get('previousWorkYear1'),
+            'year2': data.get('previousWorkYear2'),
+            'year3': data.get('previousWorkYear3')
+        }
+        
+        quality_certifications = data.get('qualityCertifications')
+        certificate_of_incorporation = data.get('certificateOfIncorporation')
+        fcci_registration = data.get('fcciRegistration')
+        other_registration_numbers = data.get('otherRegistrationNumbers')
+        
+        # Manpower details
+        manpower_data = {
+            'total_teams': data.get('totalTeamsAvailable'),
+            'teams_for_yellowstone': data.get('teamsForYellowStone'),
+            'persons_per_team': data.get('personsPerTeam'),
+            'parallel_teams': data.get('parallelTeamsDeployable'),
+            'additional_teams': data.get('additionalTeamsArrangable')
+        }
+        
+        sites_executable_per_year = data.get('sitesExecutablePerYear')
+        machinery_tools_available = data.get('machineryToolsAvailable')
+        machinery_tools_period = data.get('machineryToolsPeriod')
+        
+        normal_working_hours = data.get('normalWorkingHours')
+        work_additional_hours = data.get('workAdditionalHours')
+        work_on_holidays = data.get('workOnHolidays')
+        
+        # Organization details
+        organization_data = {
+            'management_team': data.get('managementTeam'),
+            'project_manager': data.get('projectManagerName'),
+            'technical_team': data.get('technicalTeam'),
+            'commercial_team': data.get('commercialTeam')
+        }
+        
+        # Declaration
+        signing_authority_name = data.get('signingAuthorityName')
+        signing_authority_designation = data.get('signingAuthorityDesignation')
+        company_seal = data.get('companySeal')
+        
+        # Validate required fields
+        required_fields = [
+            company_name, contact_person_name, email_address, mobile_number,
+            communication_address, core_business_activity, type_of_activity
+        ]
+        
+        if not all(required_fields):
             return jsonify({'error': 'All required fields must be filled'}), 400
         
         # Check if vendor already exists
-        check_query = "SELECT id FROM vendor_registrations WHERE email = %s"
-        existing = execute_query(check_query, (email,), fetch_one=True)
+        check_query = "SELECT id FROM vendor_registrations WHERE email_address = %s OR email = %s"
+        existing = execute_query(check_query, (email_address, email_address), fetch_one=True)
         
         if existing:
             return jsonify({'error': 'Vendor with this email already registered'}), 400
         
-        # Insert vendor registration
+        # Insert comprehensive vendor registration
         insert_query = """
         INSERT INTO vendor_registrations 
         (company_name, contact_person, email, phone, address, business_type, 
-         services, experience, certifications, vendor_references, status, created_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW())
+         services, experience, certifications, vendor_references, status, created_at,
+         company_type, contact_person_name, contact_person_designation, communication_address,
+         registered_office_address, office_phone, office_fax, mobile_number, email_address,
+         core_business_activity, type_of_activity, preferred_geographic_areas, date_of_establishment,
+         locally_registered, bank_name, bank_branch, account_holder_name, account_number,
+         account_type, rtgs_code, nrc_passport_no, major_customers, services_to_existing_clients,
+         quality_certifications, fcci_registration, other_registration_numbers, normal_working_hours,
+         work_additional_hours, work_on_holidays, signing_authority_name, signing_authority_designation)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW(),
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """
         
         execute_query(insert_query, (
-            company_name, contact_person, email, phone, address, business_type,
-            services, experience, certifications, vendor_references
+            company_name, contact_person_name, email_address, mobile_number, communication_address,
+            company_type, core_business_activity, type_of_activity, quality_certifications, major_customers,
+            company_type, contact_person_name, contact_person_designation, communication_address,
+            registered_office_address, office_phone, office_fax, mobile_number, email_address,
+            core_business_activity, type_of_activity, preferred_geographic_areas, date_of_establishment,
+            locally_registered, bank_name, bank_branch, account_holder_name, account_number,
+            account_type, rtgs_code, nrc_passport_no, major_customers, services_to_existing_clients,
+            quality_certifications, fcci_registration, other_registration_numbers, normal_working_hours,
+            work_additional_hours, work_on_holidays, signing_authority_name, signing_authority_designation
         ))
         
         return jsonify({
             'success': True,
-            'message': 'Vendor registration submitted successfully. You will receive an email once approved.'
+            'message': 'Comprehensive vendor registration submitted successfully. You will receive an email once approved.'
         })
         
     except Exception as e:
         print(f"Vendor registration error: {e}")
         return jsonify({'error': 'Failed to submit vendor registration'}), 500
+
+# Admin API endpoints for vendor registration management
+@app.route('/api/admin/vendor-registrations', methods=['GET'])
+def get_vendor_registrations():
+    """Get all vendor registrations for admin review"""
+    try:
+        query = """
+        SELECT id, company_name, contact_person, email, phone, address, 
+               business_type, services, experience, certifications, 
+               vendor_references, status, created_at, updated_at
+        FROM vendor_registrations 
+        ORDER BY created_at DESC
+        """
+        
+        registrations = execute_query(query, fetch_all=True)
+        
+        return jsonify({
+            'success': True,
+            'registrations': registrations
+        })
+        
+    except Exception as e:
+        print(f"Get vendor registrations error: {e}")
+        return jsonify({'error': 'Failed to get vendor registrations'}), 500
+
+@app.route('/api/admin/vendor-registrations/<int:registration_id>/approve', methods=['POST'])
+def approve_vendor_registration(registration_id):
+    """Approve a vendor registration"""
+    try:
+        # Get registration details
+        query = "SELECT * FROM vendor_registrations WHERE id = %s"
+        registration = execute_query(query, (registration_id,), fetch_one=True)
+        
+        if not registration:
+            return jsonify({'success': False, 'message': 'Registration not found'}), 404
+        
+        if registration['status'] != 'pending':
+            return jsonify({'success': False, 'message': 'Registration is not pending'}), 400
+        
+        # Update registration status
+        update_query = "UPDATE vendor_registrations SET status = 'approved', updated_at = NOW() WHERE id = %s"
+        execute_query(update_query, (registration_id,))
+        
+        # Generate unique password for vendor
+        vendor_password = generate_vendor_password()
+        password_hash = bcrypt.hashpw(vendor_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        # Create vendor account in vendors table with full portal access
+        vendor_query = """
+        INSERT INTO vendors (email, company_name, contact_person, phone, address, nda_status, portal_access)
+        VALUES (%s, %s, %s, %s, %s, 'pending', 1)
+        """
+        vendor_id = execute_query(vendor_query, (
+            registration['email'],
+            registration['company_name'],
+            registration['contact_person'],
+            registration['phone'],
+            registration['address']
+        ))
+        
+        if vendor_id:
+            # Create vendor login credentials
+            login_query = """
+            INSERT INTO vendor_logins (vendor_id, email, password_hash, company_name, contact_person, phone, address, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            execute_query(login_query, (
+                vendor_id, registration['email'], password_hash,
+                registration['company_name'], registration['contact_person'],
+                registration['phone'], registration['address'], True
+            ))
+            
+            # Create vendor user account for login
+            user_query = """
+            INSERT INTO users (email, password_hash, name, user_type, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE password_hash = %s, user_type = %s, updated_at = %s
+            """
+            execute_query(user_query, (
+                registration['email'], password_hash, registration['contact_person'], 'vendor', datetime.now(),
+                password_hash, 'vendor', datetime.now()
+            ))
+        
+        # Send approval email with login credentials
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = SMTP_USERNAME
+            msg['To'] = registration['email']
+            msg['Subject'] = "🎉 Portal Access Granted - YellowStone Xperiences"
+            
+            body = f"""
+Dear {registration['contact_person']},
+
+Congratulations! Your vendor registration has been approved and your portal access has been fully granted.
+
+COMPANY: {registration['company_name']}
+CONTACT PERSON: {registration['contact_person']}
+EMAIL: {registration['email']}
+
+LOGIN CREDENTIALS:
+Email: {registration['email']}
+Password: {vendor_password}
+Portal URL: http://localhost:8000/vendor-portal-login
+
+IMPORTANT SECURITY REQUIREMENTS:
+1. You are required to change your password immediately upon first login
+2. Maintain strict confidentiality of your login credentials
+3. Access the portal only from secure, authorized devices
+4. Report any suspicious activity immediately to our IT Security Department
+
+NEXT STEPS:
+- Log in to the portal using the provided credentials
+- Complete your profile setup
+- Review available partnership opportunities
+- Familiarize yourself with our vendor guidelines and procedures
+- Complete the NDA process to unlock full portal features
+
+PORTAL FEATURES AVAILABLE:
+✅ Vendor Dashboard Access
+✅ Project Opportunities
+✅ Task Management
+✅ Communication Portal
+✅ Document Management
+✅ Reporting Tools
+
+Should you encounter any technical difficulties or require assistance, please contact our Vendor Support Team at your earliest convenience.
+
+We look forward to a successful and mutually beneficial partnership.
+
+Yours sincerely,
+
+Harpreet Singh
+CEO
+YellowStone Xperiences Pvt Ltd
+Email: Harpreet.singh@yellowstonexps.com
+Phone: [Contact Number]
+Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India
+
+---
+This is an automated message. Please do not reply to this email address.
+            """
+            
+            msg.attach(MIMEText(body, 'plain'))
+            
+            # Connect to SMTP server and send email
+            print(f"Attempting to send approval email to {registration['email']}")
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            text = msg.as_string()
+            server.sendmail(SMTP_USERNAME, registration['email'], text)
+            server.quit()
+            
+            print(f"Approval email sent successfully to {registration['email']}")
+            
+        except Exception as email_error:
+            print(f"Approval email sending failed: {email_error}")
+            print(f"Email error type: {type(email_error).__name__}")
+            # Still return success since the database operations succeeded
+        
+        return jsonify({
+            'success': True,
+            'message': 'Vendor registration approved successfully. Login credentials have been sent via email.'
+        })
+        
+    except Exception as e:
+        print(f"Approve vendor registration error: {e}")
+        return jsonify({'error': 'Failed to approve vendor registration'}), 500
+
+@app.route('/api/admin/vendor-registrations/<int:registration_id>/decline', methods=['POST'])
+def decline_vendor_registration(registration_id):
+    """Decline a vendor registration"""
+    try:
+        # Get registration details
+        query = "SELECT * FROM vendor_registrations WHERE id = %s"
+        registration = execute_query(query, (registration_id,), fetch_one=True)
+        
+        if not registration:
+            return jsonify({'success': False, 'message': 'Registration not found'}), 404
+        
+        if registration['status'] != 'pending':
+            return jsonify({'success': False, 'message': 'Registration is not pending'}), 400
+        
+        # Update registration status
+        update_query = "UPDATE vendor_registrations SET status = 'declined', updated_at = NOW() WHERE id = %s"
+        execute_query(update_query, (registration_id,))
+        
+        return jsonify({
+            'success': True,
+            'message': 'Vendor registration declined'
+        })
+        
+    except Exception as e:
+        print(f"Decline vendor registration error: {e}")
+        return jsonify({'error': 'Failed to decline vendor registration'}), 500
 
 @app.route('/api/vendor/dashboard-data', methods=['GET'])
 def get_vendor_dashboard_data():

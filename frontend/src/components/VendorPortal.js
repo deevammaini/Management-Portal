@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+ import React, { useState, useEffect } from 'react';
 import { 
   LogOut, Home, Package, ClipboardList, FileCheck, Building,
   AlertCircle, CheckCircle, UserPlus, Clock, ArrowRight, Mail, Phone, MapPin
 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import StatsCard from './StatsCard';
+import ComprehensiveRegistrationForm from './ComprehensiveRegistrationForm';
 
 const VendorPortal = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -14,16 +15,126 @@ const VendorPortal = ({ user, onLogout }) => {
   const [loading, setLoading] = useState(true);
   const [showRegistrationForm, setShowRegistrationForm] = useState(false);
   const [registrationForm, setRegistrationForm] = useState({
+    // Company Details
     companyName: '',
-    contactPerson: '',
-    email: '',
-    phone: '',
-    address: '',
-    businessType: '',
-    services: '',
-    experience: '',
-    certifications: '',
-    references: ''
+    companyType: '', // Proprietary / Partnership / Pvt Ltd / Public Ltd
+    proprietorPhoto: null,
+    
+    // Contact Person Details
+    contactPersonName: '',
+    contactPersonDesignation: '',
+    visitingCard: null,
+    
+    // Address
+    communicationAddress: '',
+    registeredOfficeAddress: '',
+    
+    // Contact Details
+    officePhone: '',
+    officeFax: '',
+    mobileNumber: '',
+    emailAddress: '',
+    
+    // Business Details
+    coreBusinessActivity: '',
+    typeOfActivity: '',
+    preferredGeographicAreas: '',
+    dateOfEstablishment: '',
+    locallyRegistered: '', // Yes/No with country specification
+    
+    // Bank Details
+    bankName: '',
+    bankBranch: '',
+    bankAddress: '',
+    bankTelNo: '',
+    accountHolderName: '',
+    accountNumber: '',
+    accountType: '', // Savings / Current
+    rtgsCode: '',
+    creditLimit: '',
+    odLimit: '',
+    bgLimit: '',
+    lcLimit: '',
+    nrcPassportNo: '',
+    
+    // Customer & Services
+    majorCustomers: '',
+    servicesToExistingClients: '',
+    
+    // Business Turnover (3 years)
+    turnoverYear1: '',
+    turnoverYear2: '',
+    turnoverYear3: '',
+    orderValueYear1: '',
+    orderValueYear2: '',
+    orderValueYear3: '',
+    executedValueYear1: '',
+    executedValueYear2: '',
+    executedValueYear3: '',
+    
+    // Previous Work with YellowStone
+    previousWorkYear1: '',
+    previousWorkYear2: '',
+    previousWorkYear3: '',
+    workOrderNumbers: '',
+    workOrderDates: '',
+    workOrderValues: '',
+    
+    // Certifications & Compliance
+    qualityCertifications: '',
+    certificateOfIncorporation: null,
+    fcciRegistration: '',
+    otherRegistrationNumbers: '',
+    
+    // Manpower Details
+    totalTeamsAvailable: '',
+    teamsForYellowStone: '',
+    personsPerTeam: '',
+    parallelTeamsDeployable: '',
+    additionalTeamsArrangable: '',
+    
+    // Capabilities
+    sitesExecutablePerYear: '',
+    machineryToolsAvailable: '',
+    machineryToolsPeriod: '',
+    
+    // General Information
+    normalWorkingHours: '',
+    workAdditionalHours: '', // Yes/No
+    workOnHolidays: '', // Yes/No
+    
+    // Organization Details
+    managementTeam: '',
+    projectManagerName: '',
+    technicalTeam: '',
+    commercialTeam: '',
+    orgChart: null,
+    projectTeamStructure: null,
+    escalationMatrix: null,
+    
+    // Declaration
+    signingAuthorityName: '',
+    signingAuthorityDesignation: '',
+    companySeal: null,
+    
+    // Bank Account Details (Supplier)
+    beneficiaryPhotograph: null,
+    beneficiaryCompanyName: '',
+    beneficiaryIndividualName: '',
+    beneficiaryAddress: '',
+    beneficiaryBankBranch: '',
+    beneficiaryAccountNumber: '',
+    swiftCode: '',
+    accountTypeSupplier: '', // Saving / Current / CC
+    beneficiaryContactPerson: '',
+    beneficiaryEmail: '',
+    beneficiaryTelephone: '',
+    beneficiaryFax: '',
+    beneficiaryNrcPassport: '',
+    specimenSignature: null,
+    
+    // Attachments
+    attachments: []
   });
 
   useEffect(() => {
@@ -135,9 +246,9 @@ const VendorPortal = ({ user, onLogout }) => {
         {activeTab === 'dashboard' && (
           <div className="space-y-6">
             {/* Welcome Message */}
-            <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-xl p-6 text-white">
+            <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-yellow-500 rounded-xl p-6 text-white shadow-lg">
               <h2 className="text-2xl font-bold mb-2">Welcome to YellowStone XPs Vendor Portal</h2>
-              <p className="text-purple-100">Your NDA has been completed successfully. Complete your registration to get full access.</p>
+              <p className="text-amber-100">Your NDA has been completed successfully. Complete your registration to get full access.</p>
             </div>
 
             {/* Status Cards */}
@@ -177,7 +288,7 @@ const VendorPortal = ({ user, onLogout }) => {
                     </p>
                     <button
                       onClick={() => setShowRegistrationForm(true)}
-                      className="px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium"
+                      className="px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 font-medium shadow-md hover:shadow-lg transition-all duration-200"
                     >
                       Complete Registration
                     </button>
@@ -260,7 +371,7 @@ const VendorPortal = ({ user, onLogout }) => {
               {registrationStatus === 'pending' && (
                 <button
                   onClick={() => setShowRegistrationForm(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600"
+                  className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 shadow-md hover:shadow-lg transition-all duration-200"
                 >
                   <UserPlus size={20} />
                   Complete Registration
@@ -357,163 +468,14 @@ const VendorPortal = ({ user, onLogout }) => {
         )}
       </main>
 
-      {/* Registration Form Modal */}
-      {showRegistrationForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6 border-b">
-              <div className="flex justify-between items-center">
-                <h3 className="text-xl font-bold">Vendor Registration Form</h3>
-                <button
-                  onClick={() => setShowRegistrationForm(false)}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-            
-            <div className="p-6 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Company Name *</label>
-                  <input
-                    type="text"
-                    value={registrationForm.companyName}
-                    onChange={(e) => handleInputChange('companyName', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="Enter company name"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Contact Person *</label>
-                  <input
-                    type="text"
-                    value={registrationForm.contactPerson}
-                    onChange={(e) => handleInputChange('contactPerson', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="Enter contact person name"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Email *</label>
-                  <input
-                    type="email"
-                    value={registrationForm.email}
-                    onChange={(e) => handleInputChange('email', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="Enter email address"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Phone *</label>
-                  <input
-                    type="tel"
-                    value={registrationForm.phone}
-                    onChange={(e) => handleInputChange('phone', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    placeholder="Enter phone number"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Address *</label>
-                <textarea
-                  value={registrationForm.address}
-                  onChange={(e) => handleInputChange('address', e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="Enter company address"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Business Type *</label>
-                  <select
-                    value={registrationForm.businessType}
-                    onChange={(e) => handleInputChange('businessType', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  >
-                    <option value="">Select business type</option>
-                    <option value="IT Services">IT Services</option>
-                    <option value="Consulting">Consulting</option>
-                    <option value="Manufacturing">Manufacturing</option>
-                    <option value="Logistics">Logistics</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Years of Experience *</label>
-                  <select
-                    value={registrationForm.experience}
-                    onChange={(e) => handleInputChange('experience', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  >
-                    <option value="">Select experience</option>
-                    <option value="1-2 years">1-2 years</option>
-                    <option value="3-5 years">3-5 years</option>
-                    <option value="6-10 years">6-10 years</option>
-                    <option value="10+ years">10+ years</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Services Offered *</label>
-                <textarea
-                  value={registrationForm.services}
-                  onChange={(e) => handleInputChange('services', e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="Describe the services you offer"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Certifications</label>
-                <textarea
-                  value={registrationForm.certifications}
-                  onChange={(e) => handleInputChange('certifications', e.target.value)}
-                  rows={2}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="List any relevant certifications"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">References</label>
-                <textarea
-                  value={registrationForm.references}
-                  onChange={(e) => handleInputChange('references', e.target.value)}
-                  rows={2}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  placeholder="Provide references from previous clients"
-                />
-              </div>
-            </div>
-            
-            <div className="p-6 border-t flex justify-end gap-3">
-              <button
-                onClick={() => setShowRegistrationForm(false)}
-                className="px-4 py-2 text-gray-600 hover:text-gray-800"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleRegistrationSubmit}
-                className="px-6 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 font-medium"
-              >
-                Submit Registration
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Comprehensive Registration Form */}
+      <ComprehensiveRegistrationForm
+        isOpen={showRegistrationForm}
+        onClose={() => setShowRegistrationForm(false)}
+        onSubmit={handleRegistrationSubmit}
+        formData={registrationForm}
+        onInputChange={handleInputChange}
+      />
     </div>
   );
 };
