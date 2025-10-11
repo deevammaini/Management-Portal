@@ -33,8 +33,8 @@ app = Flask(__name__)
 CORS(app, supports_credentials=True)
 
 # Configure session
-app.secret_key = secrets.token_hex(16)
-app.config['SESSION_COOKIE_SECURE'] = False  # Set to True in production with HTTPS
+app.secret_key = SECRET_KEY
+app.config['SESSION_COOKIE_SECURE'] = FLASK_ENV == 'production'  # True in production with HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
@@ -52,21 +52,31 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROFILE_PHOTOS_FOLDER, exist_ok=True)
 
 # MySQL Database Configuration
-DB_CONFIG = {
-    'host': 'localhost',
-    'user': 'root',
-    'password': 'deevammaini',
-    'database': 'vendor_management',
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_unicode_ci'
-}
-
-# Email configuration
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_USERNAME = "deevam.maini0412@gmail.com"
-SMTP_PASSWORD = "kukv vgal lsif cuhn"
-ADMIN_EMAIL = "deevam.maini0412@gmail.com"
+# Import production config if available, otherwise use development config
+try:
+    from config_production import DB_CONFIG, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SECRET_KEY, FLASK_ENV, UPLOAD_FOLDER, PROFILE_PHOTOS_FOLDER
+    print("Using production configuration")
+except ImportError:
+    # Development configuration (fallback)
+    DB_CONFIG = {
+        'host': 'localhost',
+        'user': 'root',
+        'password': 'deevammaini',
+        'database': 'vendor_management',
+        'charset': 'utf8mb4',
+        'collation': 'utf8mb4_unicode_ci'
+    }
+    
+    SMTP_SERVER = "smtp.gmail.com"
+    SMTP_PORT = 587
+    SMTP_USERNAME = "deevam.maini0412@gmail.com"
+    SMTP_PASSWORD = "kukv vgal lsif cuhn"
+    ADMIN_EMAIL = "deevam.maini0412@gmail.com"
+    SECRET_KEY = secrets.token_hex(16)
+    FLASK_ENV = "development"
+    UPLOAD_FOLDER = "uploads"
+    PROFILE_PHOTOS_FOLDER = "profile_photos"
+    print("Using development configuration")
 
 # Current logged-in user details
 CURRENT_USER = {
@@ -5177,6 +5187,6 @@ def delete_form(form_id):
         return jsonify({'error': 'Failed to delete form'}), 500
 
 if __name__ == '__main__':
-    # Debug mode to see errors
+    # Production mode
     print("Starting Flask server...")
-    app.run(debug=True, host='0.0.0.0', port=8000)
+    app.run(debug=False, host='0.0.0.0', port=8000)

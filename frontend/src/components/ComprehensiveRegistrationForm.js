@@ -4,9 +4,13 @@ import {
   Upload, X, CheckCircle, AlertCircle, Calendar, CreditCard,
   Users, Settings, Award, ClipboardList
 } from 'lucide-react';
+import TermsAndConditions from './TermsAndConditions';
+import PrivacyPolicy from './PrivacyPolicy';
 
 const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, onInputChange }) => {
   const [currentSection, setCurrentSection] = useState(0);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   
   const sections = [
     { id: 'company', title: 'Company Details', icon: Building },
@@ -772,6 +776,39 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
               />
             </div>
           </div>
+          
+          {/* Terms and Conditions Checkbox */}
+          <div className="mt-6 p-4 bg-white border border-gray-200 rounded-lg">
+            <div className="flex items-start space-x-3">
+              <input
+                type="checkbox"
+                id="termsAccepted"
+                checked={formData.termsAccepted || false}
+                onChange={(e) => onInputChange('termsAccepted', e.target.checked)}
+                className="mt-1 h-4 w-4 text-amber-600 focus:ring-amber-500 border-gray-300 rounded"
+                required
+              />
+              <label htmlFor="termsAccepted" className="text-sm text-gray-700">
+                I agree to the{' '}
+                <button 
+                  type="button"
+                  onClick={() => setShowTermsModal(true)}
+                  className="text-amber-600 hover:text-amber-700 underline font-medium"
+                >
+                  Terms and Conditions
+                </button>
+                {' '}and{' '}
+                <button 
+                  type="button"
+                  onClick={() => setShowPrivacyModal(true)}
+                  className="text-amber-600 hover:text-amber-700 underline font-medium"
+                >
+                  Privacy Policy
+                </button>
+                {' '}of Yellow Stone Group *
+              </label>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1053,6 +1090,18 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           </div>
         </div>
       </div>
+      
+      {/* Terms and Conditions Modal */}
+      <TermsAndConditions 
+        isOpen={showTermsModal} 
+        onClose={() => setShowTermsModal(false)} 
+      />
+      
+      {/* Privacy Policy Modal */}
+      <PrivacyPolicy 
+        isOpen={showPrivacyModal} 
+        onClose={() => setShowPrivacyModal(false)} 
+      />
     </div>
   );
 };

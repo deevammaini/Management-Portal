@@ -116,6 +116,7 @@ const VendorPortal = ({ user, onLogout }) => {
     signingAuthorityName: '',
     signingAuthorityDesignation: '',
     companySeal: null,
+    termsAccepted: false,
     
     // Bank Account Details (Supplier)
     beneficiaryPhotograph: null,
@@ -156,6 +157,12 @@ const VendorPortal = ({ user, onLogout }) => {
 
   const handleRegistrationSubmit = async () => {
     try {
+      // Validation: Check if terms are accepted
+      if (!registrationForm.termsAccepted) {
+        alert('Please accept the Terms and Conditions and Privacy Policy to proceed.');
+        return;
+      }
+
       const response = await apiCall('/api/vendor/register', {
         method: 'POST',
         body: JSON.stringify(registrationForm)
