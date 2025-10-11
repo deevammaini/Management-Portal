@@ -1,5 +1,5 @@
 // Production API Configuration for yellowstonexps.com
-const API_BASE = 'https://yellowstonexps.com/vendor_portal/api';
+const API_BASE = 'https://yellowstonexperiences.com/vendor_portal/api';
 
 export const apiCall = async (endpoint, options = {}) => {
   try {

@@ -1306,7 +1306,7 @@ EMAIL: {registration['email']}
 LOGIN CREDENTIALS:
 Email: {registration['email']}
 Password: {vendor_password}
-Portal URL: http://localhost:8000/vendor-portal-login
+Portal URL: https://yellowstonexperiences.com/vendor_portal/
 
 IMPORTANT SECURITY REQUIREMENTS:
 1. You are required to change your password immediately upon first login
@@ -2535,7 +2535,7 @@ REFERENCE NUMBER: {reference_number}
 
 To facilitate this process, we have prepared a comprehensive NDA form that can be completed electronically through our secure portal. Please follow the link provided below to access and complete the required documentation:
 
-PORTAL LINK: http://localhost:8000/vendor-portal?ref={reference_number}
+PORTAL LINK: https://yellowstonexperiences.com/vendor_portal/?ref={reference_number}
 
 IMPORTANT INSTRUCTIONS:
 - Please complete all required fields accurately
@@ -3293,7 +3293,7 @@ COMPANY: {vendor['company_name']}
 PORTAL ACCESS CREDENTIALS:
 Email Address: {vendor['email']}
 Temporary Password: {vendor_password}
-Portal URL: http://localhost:8000/vendor-portal-login
+Portal URL: https://yellowstonexperiences.com/vendor_portal/
 
 IMPORTANT SECURITY REQUIREMENTS:
 1. You are required to change your password immediately upon first login
