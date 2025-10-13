@@ -853,6 +853,53 @@ def admin_login():
         return jsonify({'success': False, 'message': 'Login failed'}), 500
 
 # Health check endpoint
+@app.route('/api/test/send-nda', methods=['POST'])
+def test_send_nda():
+    """Test endpoint for NDA sending functionality"""
+    try:
+        print("🔍 Testing NDA send functionality...")
+        
+        # Test database connection
+        test_query = "SELECT COUNT(*) FROM vendors"
+        result = execute_query(test_query, fetch_one=True)
+        if result is None:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        
+        print(f"✅ Database connection working - {result['count']} vendors found")
+        
+        # Test SMTP configuration
+        print(f"🔍 SMTP Configuration:")
+        print(f"  Server: {SMTP_SERVER}")
+        print(f"  Port: {SMTP_PORT}")
+        print(f"  Username: {SMTP_USERNAME}")
+        print(f"  Password: {'*' * len(SMTP_PASSWORD) if SMTP_PASSWORD else 'NOT SET'}")
+        
+        # Test email sending (without actually sending)
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = SMTP_USERNAME
+            msg['To'] = 'test@example.com'
+            msg['Subject'] = 'Test NDA Email'
+            msg.attach(MIMEText('Test email body', 'plain'))
+            
+            print("✅ Email message created successfully")
+            
+        except Exception as email_test_error:
+            print(f"❌ Email message creation failed: {email_test_error}")
+            return jsonify({'success': False, 'error': f'Email configuration error: {str(email_test_error)}'}), 500
+        
+        return jsonify({
+            'success': True, 
+            'message': 'NDA functionality test passed',
+            'database_status': 'connected',
+            'email_status': 'configured',
+            'vendor_count': result['count']
+        })
+        
+    except Exception as e:
+        print(f"❌ Test NDA error: {e}")
+        return jsonify({'success': False, 'error': f'Test failed: {str(e)}'}), 500
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint to test database connection"""
@@ -2658,35 +2705,50 @@ def get_submitted_nda_forms():
 
 @app.route('/api/admin/send-nda', methods=['POST'])
 def send_nda():
+    """Send NDA to vendor with proper error handling"""
     try:
         data = request.get_json()
         email = data.get('email')
         company_name = data.get('company_name')
         
+        print(f"🔍 NDA Send Request: email={email}, company={company_name}")
+        
         if not email:
-            return jsonify({'error': 'Email is required'}), 400
+            print("❌ Email is required")
+            return jsonify({'success': False, 'error': 'Email is required'}), 400
         
         # Generate unique reference number
         reference_number = generate_reference_number()
+        print(f"🔍 Generated reference number: {reference_number}")
         
         # Check if vendor already exists
         check_query = "SELECT id FROM vendors WHERE email = %s"
         existing_vendor = execute_query(check_query, (email,), fetch_one=True)
         
         if existing_vendor:
+            print(f"🔍 Updating existing vendor: {existing_vendor['id']}")
             # Update existing vendor
             query = """
             UPDATE vendors SET company_name = %s, reference_number = %s, updated_at = %s
             WHERE email = %s
             """
-            execute_query(query, (company_name, reference_number, datetime.now(), email))
+            result = execute_query(query, (company_name, reference_number, datetime.now(), email))
+            if result is None:
+                print("❌ Failed to update vendor")
+                return jsonify({'success': False, 'error': 'Failed to update vendor'}), 500
         else:
+            print(f"🔍 Creating new vendor")
             # Insert new vendor
             query = """
             INSERT INTO vendors (email, company_name, nda_status, reference_number, created_at)
             VALUES (%s, %s, %s, %s, %s)
             """
-            execute_query(query, (email, company_name, 'sent', reference_number, datetime.now()))
+            result = execute_query(query, (email, company_name, 'sent', reference_number, datetime.now()))
+            if result is None:
+                print("❌ Failed to create vendor")
+                return jsonify({'success': False, 'error': 'Failed to create vendor'}), 500
+        
+        print(f"✅ Vendor record saved successfully")
         
         # Send email with NDA form
         try:
@@ -2709,7 +2771,7 @@ REFERENCE NUMBER: {reference_number}
 
 To facilitate this process, we have prepared a comprehensive NDA form that can be completed electronically through our secure portal. Please follow the link provided below to access and complete the required documentation:
 
-PORTAL LINK: https://yellowstonexperiences.com/vendor_portal/?ref={reference_number}
+PORTAL LINK: https://yellowstonevendormanagement.netlify.app/vendor?ref={reference_number}
 
 IMPORTANT INSTRUCTIONS:
 - Please complete all required fields accurately
@@ -2739,24 +2801,37 @@ This is an automated message. Please do not reply to this email address.
             msg.attach(MIMEText(body, 'plain'))
             
             # Connect to SMTP server and send email
+            print(f"🔍 Attempting to send email to {email}")
+            print(f"🔍 SMTP Server: {SMTP_SERVER}:{SMTP_PORT}")
+            print(f"🔍 SMTP Username: {SMTP_USERNAME}")
+            
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            print(f"🔍 Starting TLS...")
             server.starttls()
+            print(f"🔍 Logging in...")
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            print(f"🔍 Sending email...")
             text = msg.as_string()
             server.sendmail(SMTP_USERNAME, email, text)
             server.quit()
             
-            print(f"NDA email sent successfully to {email} with reference {reference_number}")
+            print(f"✅ NDA email sent successfully to {email} with reference {reference_number}")
             
         except Exception as email_error:
-            print(f"Email sending failed: {email_error}")
+            print(f"❌ Email sending failed: {email_error}")
+            print(f"❌ Email error type: {type(email_error).__name__}")
+            import traceback
+            traceback.print_exc()
             # Still return success since the database operation succeeded
-            return jsonify({'success': True, 'message': 'NDA recorded but email delivery failed', 'reference_number': reference_number})
+            return jsonify({'success': True, 'message': 'NDA recorded but email delivery failed', 'reference_number': reference_number, 'email_error': str(email_error)})
         
         return jsonify({'success': True, 'message': 'NDA sent successfully', 'reference_number': reference_number})
     except Exception as e:
-        print(f"Send NDA error: {e}")
-        return jsonify({'error': 'Failed to send NDA'}), 500
+        print(f"❌ Send NDA error: {e}")
+        print(f"❌ Error type: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': f'Failed to send NDA: {str(e)}'}), 500
 
 def send_nda_email(email, company_name, contact_person, reference_number):
     """Send NDA email to vendor"""
