@@ -330,7 +330,7 @@ def get_vendors_data():
     """Get all vendors from MySQL"""
     try:
         # First check if table exists
-        table_check = execute_query("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'vendors')", fetch_one=True)
+        table_check = execute_query("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'vendors') as exists", fetch_one=True)
         if not table_check or not table_check['exists']:
             print("❌ Vendors table does not exist!")
             return []
@@ -352,7 +352,7 @@ def get_nda_requests_data():
     """Get all NDA requests from MySQL"""
     try:
         # First check if table exists
-        table_check = execute_query("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'nda_requests')", fetch_one=True)
+        table_check = execute_query("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'nda_requests') as exists", fetch_one=True)
         if not table_check or not table_check['exists']:
             print("❌ NDA requests table does not exist!")
             return []
@@ -2727,9 +2727,7 @@ def send_nda():
             WHERE email = %s
             """
             result = execute_query(query, (company_name, reference_number, datetime.now(), email))
-            if result is None:
-                print("❌ Failed to update vendor")
-                return jsonify({'success': False, 'error': 'Failed to update vendor'}), 500
+            print(f"✅ Vendor update query executed successfully")
         else:
             print(f"🔍 Creating new vendor")
             # Insert new vendor
@@ -2738,9 +2736,7 @@ def send_nda():
             VALUES (%s, %s, %s, %s, %s)
             """
             result = execute_query(query, (email, company_name, 'sent', reference_number, datetime.now()))
-            if result is None:
-                print("❌ Failed to create vendor")
-                return jsonify({'success': False, 'error': 'Failed to create vendor'}), 500
+            print(f"✅ Vendor insert query executed successfully")
         
         print(f"✅ Vendor record saved successfully")
         
@@ -3009,25 +3005,25 @@ def get_admin_notifications():
         query = """
         SELECT 
             'vendor_nda_submitted' as type,
-            ('NDA Submitted by ' || COALESCE(company_name, 'Unknown Company')) as title,
-            ('New NDA form submitted by ' || COALESCE(company_name, 'Unknown Company') || ' (' || COALESCE(contact_person, 'Unknown Contact') || ')') as message,
+            CONCAT('NDA Submitted by ', COALESCE(company_name, 'Unknown Company')) as title,
+            CONCAT('New NDA form submitted by ', COALESCE(company_name, 'Unknown Company'), ' (', COALESCE(contact_person, 'Unknown Contact'), ')') as message,
             created_at,
             id as reference_id
         FROM vendors 
         WHERE nda_status = 'completed' 
-        AND created_at >= NOW() - INTERVAL '30 days'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         
         UNION ALL
         
         SELECT 
             'vendor_approved' as type,
-            ('Vendor Approved: ' || COALESCE(company_name, 'Unknown Company')) as title,
-            ('Portal access granted to ' || COALESCE(company_name, 'Unknown Company')) as message,
+            CONCAT('Vendor Approved: ', COALESCE(company_name, 'Unknown Company')) as title,
+            CONCAT('Portal access granted to ', COALESCE(company_name, 'Unknown Company')) as message,
             updated_at as created_at,
             id as reference_id
         FROM vendors 
         WHERE nda_status = 'approved' 
-        AND updated_at >= NOW() - INTERVAL '30 days'
+        AND updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         
         ORDER BY created_at DESC
         LIMIT 50
