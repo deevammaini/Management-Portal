@@ -335,6 +335,12 @@ def save_ticket(ticket_data):
 def get_vendors_data():
     """Get all vendors from PostgreSQL"""
     try:
+        # First check if table exists
+        table_check = execute_query("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'vendors')", fetch_one=True)
+        if not table_check or not table_check['exists']:
+            print("❌ Vendors table does not exist!")
+            return []
+        
         query = "SELECT * FROM vendors"
         print(f"🔍 Executing vendors query: {query}")
         vendors = execute_query(query, fetch_all=True)
@@ -342,20 +348,32 @@ def get_vendors_data():
         if vendors is None:
             print("⚠️ Vendors query returned None")
             return []
-        print(f"✅ Vendors query returned {len(vendors)} records")
+        print(f"✅ Vendors query returned {len(vendors) if vendors else 0} records")
         return vendors
     except Exception as e:
         print(f"❌ Error getting vendors: {e}")
         return []
 
 def get_nda_requests_data():
-    """Get all NDA requests from MySQL"""
+    """Get all NDA requests from PostgreSQL"""
     try:
+        # First check if table exists
+        table_check = execute_query("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'nda_requests')", fetch_one=True)
+        if not table_check or not table_check['exists']:
+            print("❌ NDA requests table does not exist!")
+            return []
+        
         query = "SELECT * FROM nda_requests"
+        print(f"🔍 Executing NDA requests query: {query}")
         nda_requests = execute_query(query, fetch_all=True)
-        return nda_requests or []
+        print(f"🔍 NDA requests query result: {nda_requests}")
+        if nda_requests is None:
+            print("⚠️ NDA requests query returned None")
+            return []
+        print(f"✅ NDA requests query returned {len(nda_requests) if nda_requests else 0} records")
+        return nda_requests
     except Exception as e:
-        print(f"Error getting NDA requests: {e}")
+        print(f"❌ Error getting NDA requests: {e}")
         return []
 
 def get_notifications_data():
