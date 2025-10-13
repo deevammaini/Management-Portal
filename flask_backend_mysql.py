@@ -2586,6 +2586,10 @@ def get_employee(employee_id):
 def get_admin_vendors():
     try:
         vendors = get_vendors_data()
+        # Safety check to prevent NoneType errors
+        if vendors is None:
+            print("⚠️ Vendors returned None - database connection issue")
+            vendors = []
         return jsonify(vendors)
     except Exception as e:
         print(f"Get vendors error: {e}")
@@ -2595,6 +2599,10 @@ def get_admin_vendors():
 def get_submitted_nda_forms():
     try:
         nda_requests = get_nda_requests_data()
+        # Safety check to prevent NoneType errors
+        if nda_requests is None:
+            print("⚠️ NDA requests returned None - database connection issue")
+            nda_requests = []
         return jsonify(nda_requests)
     except Exception as e:
         print(f"Get NDA forms error: {e}")
