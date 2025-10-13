@@ -31,16 +31,17 @@ import json
 
 # Import configuration
 try:
-    from config_production import SECRET_KEY, FLASK_ENV, DB_CONFIG, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+    from config_production import SECRET_KEY, FLASK_ENV, DB_CONFIG, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, DB_TYPE
 except ImportError:
     # Fallback configuration for local development
     SECRET_KEY = 'dev-secret-key-change-in-production'
     FLASK_ENV = 'development'
+    DB_TYPE = 'postgresql'
     DB_CONFIG = {
-        'host': os.environ.get('DB_HOST', 'db.your-project.supabase.co'),
-        'user': os.environ.get('DB_USER', 'postgres'),
-        'password': os.environ.get('DB_PASSWORD', 'your-password'),
-        'database': os.environ.get('DB_NAME', 'postgres'),
+        'host': os.environ.get('DB_HOST', 'aws-1-ap-south-1.pooler.supabase.com'),  # Supabase Session Pooler
+        'user': os.environ.get('DB_USER', 'postgres.chrnpxnqfsvyaidiftjq'),   # Supabase user
+        'password': os.environ.get('DB_PASSWORD', 'your-supabase-password'),  # Your Supabase password
+        'database': os.environ.get('DB_NAME', 'postgres'),  # Supabase database name
         'port': int(os.environ.get('DB_PORT', '5432'))
     }
     SMTP_SERVER = 'smtp.gmail.com'
@@ -106,24 +107,33 @@ def generate_vendor_password():
 
 # Database connection helper
 def get_db_connection():
-    """Get PostgreSQL database connection"""
+    """Get database connection (PostgreSQL or MySQL)"""
     try:
         print(f"🔍 Attempting to connect to database...")
+        print(f"Database Type: {DB_TYPE}")
         print(f"Host: {DB_CONFIG.get('host', 'NOT_SET')}")
         print(f"Port: {DB_CONFIG.get('port', 'NOT_SET')}")
         print(f"User: {DB_CONFIG.get('user', 'NOT_SET')}")
         print(f"Database: {DB_CONFIG.get('database', 'NOT_SET')}")
         
-        connection = pg8000.connect(**DB_CONFIG)
-        print("✅ Database connection successful!")
+        if DB_TYPE == 'mysql':
+            # MySQL connection
+            import mysql.connector
+            connection = mysql.connector.connect(**DB_CONFIG)
+            print("✅ MySQL database connection successful!")
+        else:
+            # PostgreSQL connection (default)
+            connection = pg8000.connect(**DB_CONFIG)
+            print("✅ PostgreSQL database connection successful!")
+        
         return connection
     except Error as e:
-        print(f"❌ Error connecting to PostgreSQL: {e}")
+        print(f"❌ Error connecting to database: {e}")
         print(f"❌ Connection details: {DB_CONFIG}")
         return None
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
-    """Execute PostgreSQL query and return results as dictionaries"""
+    """Execute database query and return results as dictionaries"""
     connection = get_db_connection()
     if not connection:
         print("❌ No database connection available")
@@ -132,24 +142,36 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         return None
     
     try:
-        cursor = connection.cursor()
+        if DB_TYPE == 'mysql':
+            # MySQL connection with dictionary cursor
+            cursor = connection.cursor(dictionary=True)
+        else:
+            # PostgreSQL connection
+            cursor = connection.cursor()
+        
         cursor.execute(query, params)
         
         if fetch_one:
             result = cursor.fetchone()
             if result:
-                # Get column names
-                column_names = [desc[0] for desc in cursor.description]
-                # Convert tuple to dictionary
-                return dict(zip(column_names, result))
+                if DB_TYPE == 'mysql':
+                    # MySQL returns dictionaries by default with dictionary=True
+                    return result
+                else:
+                    # PostgreSQL - convert tuple to dictionary
+                    column_names = [desc[0] for desc in cursor.description]
+                    return dict(zip(column_names, result))
             return None
         elif fetch_all:
             results = cursor.fetchall()
             if results:
-                # Get column names
-                column_names = [desc[0] for desc in cursor.description]
-                # Convert tuples to dictionaries
-                return [dict(zip(column_names, row)) for row in results]
+                if DB_TYPE == 'mysql':
+                    # MySQL returns dictionaries by default with dictionary=True
+                    return results
+                else:
+                    # PostgreSQL - convert tuples to dictionaries
+                    column_names = [desc[0] for desc in cursor.description]
+                    return [dict(zip(column_names, row)) for row in results]
             return []  # Return empty list instead of None
         else:
             result = None
