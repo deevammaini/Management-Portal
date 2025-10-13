@@ -5,8 +5,8 @@ from flask import Flask, jsonify, request, send_file, session, send_from_directo
 from flask_cors import CORS
 import os
 from datetime import datetime, timedelta
-import psycopg2
-from psycopg2 import Error
+import pg8000
+from pg8000 import Error
 import bcrypt
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -108,7 +108,7 @@ def generate_vendor_password():
 def get_db_connection():
     """Get PostgreSQL database connection"""
     try:
-        connection = psycopg2.connect(**DB_CONFIG)
+        connection = pg8000.connect(**DB_CONFIG)
         return connection
     except Error as e:
         print(f"Error connecting to PostgreSQL: {e}")
