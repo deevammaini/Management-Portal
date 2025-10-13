@@ -820,6 +820,48 @@ def admin_login():
         print(f"Admin login error: {e}")
         return jsonify({'success': False, 'message': 'Login failed'}), 500
 
+# Health check endpoint
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint to test database connection"""
+    try:
+        # Test database connection
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({
+                'status': 'error',
+                'message': 'Database connection failed',
+                'database': 'disconnected'
+            }), 500
+        
+        # Test simple query
+        result = execute_query("SELECT 1 as test", fetch_one=True)
+        if not result:
+            return jsonify({
+                'status': 'error',
+                'message': 'Database query failed',
+                'database': 'connected_but_query_failed'
+            }), 500
+        
+        # Test vendors table
+        vendors_count = execute_query("SELECT COUNT(*) FROM vendors", fetch_one=True)
+        users_count = execute_query("SELECT COUNT(*) FROM users", fetch_one=True)
+        
+        return jsonify({
+            'status': 'healthy',
+            'message': 'All systems operational',
+            'database': 'connected',
+            'vendors_count': vendors_count['count'] if vendors_count else 0,
+            'users_count': users_count['count'] if users_count else 0
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'Health check failed: {str(e)}',
+            'database': 'error'
+        }), 500
+
 # Dashboard routes
 @app.route('/api/dashboard/stats', methods=['GET'])
 def get_dashboard_stats():
