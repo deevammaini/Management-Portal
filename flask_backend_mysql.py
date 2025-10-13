@@ -333,13 +333,19 @@ def save_ticket(ticket_data):
         return None
 
 def get_vendors_data():
-    """Get all vendors from MySQL"""
+    """Get all vendors from PostgreSQL"""
     try:
         query = "SELECT * FROM vendors"
+        print(f"🔍 Executing vendors query: {query}")
         vendors = execute_query(query, fetch_all=True)
-        return vendors or []
+        print(f"🔍 Vendors query result: {vendors}")
+        if vendors is None:
+            print("⚠️ Vendors query returned None")
+            return []
+        print(f"✅ Vendors query returned {len(vendors)} records")
+        return vendors
     except Exception as e:
-        print(f"Error getting vendors: {e}")
+        print(f"❌ Error getting vendors: {e}")
         return []
 
 def get_nda_requests_data():
