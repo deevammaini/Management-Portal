@@ -375,7 +375,7 @@ def employee_login_by_id():
         SELECT u.*, COALESCE(m.name, '') as manager_name
         FROM users u
         LEFT JOIN users m ON u.manager = m.id
-        WHERE u.employee_id = %s AND u.user_type = 'employee'
+        WHERE u.employee_id = %s::text AND u.user_type = 'employee'
         """
         user = execute_query(query, (employee_id,), fetch_one=True)
         
@@ -826,18 +826,18 @@ def get_dashboard_stats():
         tickets_query = "SELECT COUNT(*) as count FROM tickets"
         users_query = "SELECT COUNT(*) as count FROM users"
         
-        tasks_count = execute_query(tasks_query, fetch_one=True)['count']
-        projects_count = execute_query(projects_query, fetch_one=True)['count']
-        workflows_count = execute_query(workflows_query, fetch_one=True)['count']
-        tickets_count = execute_query(tickets_query, fetch_one=True)['count']
-        users_count = execute_query(users_query, fetch_one=True)['count']
+        tasks_count = execute_query(tasks_query, fetch_one=True)
+        projects_count = execute_query(projects_query, fetch_one=True)
+        workflows_count = execute_query(workflows_query, fetch_one=True)
+        tickets_count = execute_query(tickets_query, fetch_one=True)
+        users_count = execute_query(users_query, fetch_one=True)
         
         return jsonify({
-            'total_tasks': tasks_count,
-            'total_projects': projects_count,
-            'total_workflows': workflows_count,
-            'total_tickets': tickets_count,
-            'active_users': users_count
+            'total_tasks': tasks_count['count'] if tasks_count else 0,
+            'total_projects': projects_count['count'] if projects_count else 0,
+            'total_workflows': workflows_count['count'] if workflows_count else 0,
+            'total_tickets': tickets_count['count'] if tickets_count else 0,
+            'active_users': users_count['count'] if users_count else 0
         })
         
     except Exception as e:
@@ -908,7 +908,7 @@ def clock_in():
         
         # Check if already clocked in today
         check_query = "SELECT id, clock_in_time FROM attendance WHERE employee_id = %s AND date = %s"
-        existing = execute_query(check_query, (employee_id, current_date), fetch_one=True)
+        existing = execute_query(check_query, (user['id'], current_date), fetch_one=True)
         
         if existing and existing['clock_in_time']:
             return jsonify({'error': 'Already clocked in today'}), 400
@@ -971,7 +971,7 @@ def clock_out():
         
         # Check if clocked in today
         check_query = "SELECT id, clock_in_time, status FROM attendance WHERE employee_id = %s AND date = %s"
-        attendance = execute_query(check_query, (employee_id, current_date), fetch_one=True)
+        attendance = execute_query(check_query, (user['id'], current_date), fetch_one=True)
         
         if not attendance or not attendance['clock_in_time']:
             return jsonify({'error': 'Please clock in first'}), 400
@@ -1020,7 +1020,7 @@ def get_attendance_status():
         FROM attendance 
         WHERE employee_id = %s AND date = %s
         """
-        attendance = execute_query(query, (employee_id, current_date), fetch_one=True)
+        attendance = execute_query(query, (user['id'], current_date), fetch_one=True)
         
         if not attendance:
             return jsonify({
@@ -1074,7 +1074,7 @@ def get_attendance_history():
             WHERE employee_id = %s AND YEAR(date) = %s AND MONTH(date) = %s
             ORDER BY date DESC
             """
-            attendance_records = execute_query(query, (employee_id, year, month), fetch_all=True)
+            attendance_records = execute_query(query, (user['id'], year, month), fetch_all=True)
         else:
             # Get current month
             current_date = date.today()
@@ -1084,7 +1084,7 @@ def get_attendance_history():
             WHERE employee_id = %s AND YEAR(date) = %s AND MONTH(date) = %s
             ORDER BY date DESC
             """
-            attendance_records = execute_query(query, (employee_id, current_date.year, current_date.month), fetch_all=True)
+            attendance_records = execute_query(query, (user['id'], current_date.year, current_date.month), fetch_all=True)
         
         # Format the data
         formatted_records = []
@@ -1558,7 +1558,7 @@ def update_employee(employee_id):
         
         # Check if email or employee_id is taken by another employee
         query = "SELECT id FROM users WHERE (email = %s OR employee_id = %s) AND id != %s"
-        existing = execute_query(query, (email, employee_id_new, employee_id), fetch_one=True)
+        existing = execute_query(query, (email, employee_id_new, user['id']), fetch_one=True)
         if existing:
             return jsonify({'success': False, 'message': 'Email or employee ID already exists for another employee'}), 400
         
@@ -2801,31 +2801,35 @@ def get_admin_notifications():
         query = """
         SELECT 
             'vendor_nda_submitted' as type,
-            CONCAT('NDA Submitted by ', company_name) as title,
-            CONCAT('New NDA form submitted by ', company_name, ' (', contact_person, ')') as message,
+            ('NDA Submitted by ' || company_name) as title,
+            ('New NDA form submitted by ' || company_name || ' (' || contact_person || ')') as message,
             created_at,
             id as reference_id
         FROM vendors 
         WHERE nda_status = 'completed' 
-        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        AND created_at >= NOW() - INTERVAL '30 days'
         
         UNION ALL
         
         SELECT 
             'vendor_approved' as type,
-            CONCAT('Vendor Approved: ', company_name) as title,
-            CONCAT('Portal access granted to ', company_name) as message,
+            ('Vendor Approved: ' || company_name) as title,
+            ('Portal access granted to ' || company_name) as message,
             updated_at as created_at,
             id as reference_id
         FROM vendors 
         WHERE nda_status = 'approved' 
-        AND updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        AND updated_at >= NOW() - INTERVAL '30 days'
         
         ORDER BY created_at DESC
         LIMIT 50
         """
         
         notifications = execute_query(query, fetch_all=True)
+        
+        # Handle case where query returns None
+        if notifications is None:
+            notifications = []
         
         return jsonify({
             'success': True,
@@ -3417,6 +3421,10 @@ def get_nda_forms():
         ORDER BY v.signed_date DESC, v.created_at DESC
         """
         forms = execute_query(query, fetch_all=True)
+        
+        # Handle case where query returns None
+        if forms is None:
+            forms = []
         
         # Format the response
         formatted_forms = []
@@ -4708,7 +4716,8 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         nda_templates = execute_query(nda_query, fetch_all=True)
-        all_templates.extend(nda_templates)
+        if nda_templates:
+            all_templates.extend(nda_templates)
         
         # Get Contract templates
         contract_query = """
@@ -4718,7 +4727,8 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         contract_templates = execute_query(contract_query, fetch_all=True)
-        all_templates.extend(contract_templates)
+        if contract_templates:
+            all_templates.extend(contract_templates)
         
         # Get Employment templates
         employment_query = """
@@ -4728,7 +4738,8 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         employment_templates = execute_query(employment_query, fetch_all=True)
-        all_templates.extend(employment_templates)
+        if employment_templates:
+            all_templates.extend(employment_templates)
         
         # Get Vendor templates
         vendor_query = """
@@ -4738,7 +4749,8 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         vendor_templates = execute_query(vendor_query, fetch_all=True)
-        all_templates.extend(vendor_templates)
+        if vendor_templates:
+            all_templates.extend(vendor_templates)
         
         # Get Compliance templates
         compliance_query = """
@@ -4748,7 +4760,8 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         compliance_templates = execute_query(compliance_query, fetch_all=True)
-        all_templates.extend(compliance_templates)
+        if compliance_templates:
+            all_templates.extend(compliance_templates)
         
         # Get Custom templates
         custom_query = """
@@ -4758,7 +4771,8 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         custom_templates = execute_query(custom_query, fetch_all=True)
-        all_templates.extend(custom_templates)
+        if custom_templates:
+            all_templates.extend(custom_templates)
         
         # Sort all templates by creation date
         all_templates.sort(key=lambda x: x['created_at'], reverse=True)
@@ -5086,6 +5100,10 @@ def get_forms():
         ORDER BY f.created_at DESC
         """
         forms = execute_query(query, fetch_all=True)
+        
+        # Handle case where query returns None
+        if forms is None:
+            forms = []
         
         return jsonify({'success': True, 'forms': forms})
         
