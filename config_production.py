@@ -1,17 +1,15 @@
-# Production Database Configuration for cPanel Shared Hosting
-# Replace these values with your actual cPanel database credentials
+# Production Database Configuration for PostgreSQL/Supabase
+# Replace these values with your actual Supabase database credentials
 
 import os
 
-# Production Database Configuration
+# Production Database Configuration for PostgreSQL/Supabase
 DB_CONFIG = {
-    'host': os.environ.get('DB_HOST', 'localhost'),
-    'user': os.environ.get('DB_USER', 'root'),
-    'password': os.environ.get('DB_PASSWORD', 'deevammaini'),
-    'database': os.environ.get('DB_NAME', 'vendor_management'),
-    'charset': 'utf8mb4',
-    'collation': 'utf8mb4_unicode_ci',
-    'port': 3306
+    'host': os.environ.get('DB_HOST', 'db.your-project.supabase.co'),
+    'user': os.environ.get('DB_USER', 'postgres'),
+    'password': os.environ.get('DB_PASSWORD', 'your-supabase-password'),
+    'database': os.environ.get('DB_NAME', 'postgres'),
+    'port': int(os.environ.get('DB_PORT', '5432'))
 }
 
 # Production Email Configuration

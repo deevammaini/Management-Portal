@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Flask backend for Yellowstone Management Portal with MySQL
+# Flask backend for Yellowstone Management Portal with PostgreSQL/Supabase
 
 from flask import Flask, jsonify, request, send_file, session, send_from_directory, redirect, make_response
 from flask_cors import CORS
