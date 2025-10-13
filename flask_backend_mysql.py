@@ -374,7 +374,7 @@ def employee_login_by_id():
         query = """
         SELECT u.*, COALESCE(m.name, '') as manager_name
         FROM users u
-        LEFT JOIN users m ON u.manager = m.id
+        LEFT JOIN users m ON u.manager::integer = m.id
         WHERE u.employee_id = %s::text AND u.user_type = 'employee'
         """
         user = execute_query(query, (employee_id,), fetch_one=True)
@@ -854,7 +854,7 @@ def get_employee_details_by_id(employee_id):
                COALESCE(m.name, '') as manager_name, u.phone, u.address, u.hire_date, 
                u.salary, u.emergency_contact, u.status
         FROM users u
-        LEFT JOIN users m ON u.manager = m.id
+        LEFT JOIN users m ON u.manager::integer = m.id
         WHERE u.user_type = 'employee' AND u.employee_id = %s
         """
         employee = execute_query(query, (employee_id,), fetch_one=True)
@@ -899,6 +899,13 @@ def clock_in():
         
         if not employee_id:
             return jsonify({'error': 'Employee ID is required'}), 400
+        
+        # Get user ID from employee_id
+        user_query = "SELECT id FROM users WHERE employee_id = %s::text AND user_type = 'employee'"
+        user = execute_query(user_query, (employee_id,), fetch_one=True)
+        
+        if not user:
+            return jsonify({'error': 'Employee not found'}), 404
         
         from datetime import datetime, time, date
         
@@ -963,6 +970,13 @@ def clock_out():
         if not employee_id:
             return jsonify({'error': 'Employee ID is required'}), 400
         
+        # Get user ID from employee_id
+        user_query = "SELECT id FROM users WHERE employee_id = %s::text AND user_type = 'employee'"
+        user = execute_query(user_query, (employee_id,), fetch_one=True)
+        
+        if not user:
+            return jsonify({'error': 'Employee not found'}), 404
+        
         from datetime import datetime, time, date
         
         current_time = datetime.now()
@@ -1010,6 +1024,13 @@ def get_attendance_status():
         
         if not employee_id:
             return jsonify({'error': 'Employee ID is required'}), 400
+        
+        # Get user ID from employee_id
+        user_query = "SELECT id FROM users WHERE employee_id = %s::text AND user_type = 'employee'"
+        user = execute_query(user_query, (employee_id,), fetch_one=True)
+        
+        if not user:
+            return jsonify({'error': 'Employee not found'}), 404
         
         from datetime import date
         
@@ -1063,6 +1084,13 @@ def get_attendance_history():
         
         if not employee_id:
             return jsonify({'error': 'Employee ID is required'}), 400
+        
+        # Get user ID from employee_id
+        user_query = "SELECT id FROM users WHERE employee_id = %s::text AND user_type = 'employee'"
+        user = execute_query(user_query, (employee_id,), fetch_one=True)
+        
+        if not user:
+            return jsonify({'error': 'Employee not found'}), 404
         
         from datetime import date, datetime
         
@@ -1558,7 +1586,7 @@ def update_employee(employee_id):
         
         # Check if email or employee_id is taken by another employee
         query = "SELECT id FROM users WHERE (email = %s OR employee_id = %s) AND id != %s"
-        existing = execute_query(query, (email, employee_id_new, user['id']), fetch_one=True)
+        existing = execute_query(query, (email, employee_id_new, employee_id), fetch_one=True)
         if existing:
             return jsonify({'success': False, 'message': 'Email or employee ID already exists for another employee'}), 400
         
