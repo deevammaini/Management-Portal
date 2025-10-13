@@ -139,9 +139,11 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         print(f"Params: {params}")
         return None
     finally:
-        if connection.is_connected():
+        try:
             cursor.close()
             connection.close()
+        except:
+            pass
 
 def _generate_avatar(name):
     """Generate avatar initials from name"""
