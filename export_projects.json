@@ -1,0 +1,19 @@
+[
+  {
+    "id": 2,
+    "name": "Data Scrapping for LLM models",
+    "description": "Scrap data for various generes in Dubai for llm model",
+    "status": "Active",
+    "start_date": "2025-10-10",
+    "end_date": "2025-10-26",
+    "budget": "",
+    "created_by": 1,
+    "project_manager": 17,
+    "created_at": "2025-10-10 12:25:38",
+    "updated_at": "2025-10-10 12:49:34",
+    "salary_code": "50099",
+    "assigned_to_type": "employee",
+    "priority": "urgent",
+    "assigned_to_id": 17
+  }
+]

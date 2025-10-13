@@ -1,0 +1,19 @@
+[
+  {
+    "id": 4,
+    "name": "Test NDA Template 4",
+    "description": "A test NDA template",
+    "category": "general",
+    "priority": "medium",
+    "status": "draft",
+    "company_name": 1,
+    "contact_person": 1,
+    "email_address": 1,
+    "phone_number": 1,
+    "company_address": 1,
+    "confidentiality_period": 1,
+    "created_at": "2025-10-09 17:42:45",
+    "updated_at": "2025-10-09 17:42:45",
+    "created_by": 1
+  }
+]

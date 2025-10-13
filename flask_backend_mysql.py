@@ -5,8 +5,8 @@ from flask import Flask, jsonify, request, send_file, session, send_from_directo
 from flask_cors import CORS
 import os
 from datetime import datetime, timedelta
-import mysql.connector
-from mysql.connector import Error
+import psycopg2
+from psycopg2 import Error
 import bcrypt
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -37,13 +37,11 @@ except ImportError:
     SECRET_KEY = 'dev-secret-key-change-in-production'
     FLASK_ENV = 'development'
     DB_CONFIG = {
-        'host': 'localhost',
-        'user': 'root',
-        'password': 'deevammaini',
-        'database': 'vendor_management',
-        'charset': 'utf8mb4',
-        'collation': 'utf8mb4_unicode_ci',
-        'port': 3306
+        'host': os.environ.get('DB_HOST', 'db.your-project.supabase.co'),
+        'user': os.environ.get('DB_USER', 'postgres'),
+        'password': os.environ.get('DB_PASSWORD', 'your-password'),
+        'database': os.environ.get('DB_NAME', 'postgres'),
+        'port': int(os.environ.get('DB_PORT', '5432'))
     }
     SMTP_SERVER = 'smtp.gmail.com'
     SMTP_PORT = 587
@@ -108,16 +106,16 @@ def generate_vendor_password():
 
 # Database connection helper
 def get_db_connection():
-    """Get MySQL database connection"""
+    """Get PostgreSQL database connection"""
     try:
-        connection = mysql.connector.connect(**DB_CONFIG)
+        connection = psycopg2.connect(**DB_CONFIG)
         return connection
     except Error as e:
-        print(f"Error connecting to MySQL: {e}")
+        print(f"Error connecting to PostgreSQL: {e}")
         return None
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
-    """Execute MySQL query"""
+    """Execute PostgreSQL query"""
     connection = get_db_connection()
     if not connection:
         return None

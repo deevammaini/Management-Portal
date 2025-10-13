@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "template_id": 1,
+    "template_type": "contract",
+    "template_name": "Service Contract Template",
+    "filled_data": "{\"deliverables\": \"Complete website with admin panel\", \"payment_terms\": \"Monthly payments\", \"contract_duration\": 12, \"service_description\": \"Web development services\"}",
+    "status": "approved",
+    "submitted_by": 1,
+    "assigned_to": 6,
+    "due_date": "2025-10-16",
+    "priority": "high",
+    "notes": "Form approved and assigned to Harpreet Singh for final review",
+    "created_at": "2025-10-09 17:53:59",
+    "updated_at": "2025-10-09 18:09:11"
+  },
+  {
+    "id": 3,
+    "template_id": 4,
+    "template_type": "nda",
+    "template_name": "Test NDA Template 4",
+    "filled_data": "{\"company_name\": \"Test Company\", \"email_address\": \"john@test.com\", \"contact_person\": \"John Doe\"}",
+    "status": "submitted",
+    "submitted_by": 1,
+    "assigned_to": null,
+    "due_date": null,
+    "priority": "medium",
+    "notes": "Test form submission",
+    "created_at": "2025-10-09 18:29:16",
+    "updated_at": "2025-10-09 18:29:16"
+  }
+]
