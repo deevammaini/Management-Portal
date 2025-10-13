@@ -29,8 +29,35 @@ import uuid
 import secrets
 import json
 
+# Import configuration
+try:
+    from config_production import SECRET_KEY, FLASK_ENV, DB_CONFIG, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+except ImportError:
+    # Fallback configuration for local development
+    SECRET_KEY = 'dev-secret-key-change-in-production'
+    FLASK_ENV = 'development'
+    DB_CONFIG = {
+        'host': 'localhost',
+        'user': 'root',
+        'password': 'deevammaini',
+        'database': 'vendor_management',
+        'charset': 'utf8mb4',
+        'collation': 'utf8mb4_unicode_ci',
+        'port': 3306
+    }
+    SMTP_SERVER = 'smtp.gmail.com'
+    SMTP_PORT = 587
+    SMTP_USERNAME = 'deevam.maini0412@gmail.com'
+    SMTP_PASSWORD = 'kukv vgal lsif cuhn'
+    ADMIN_EMAIL = 'deevam.maini0412@gmail.com'
+
 app = Flask(__name__)
-CORS(app, supports_credentials=True)
+CORS(app, 
+     supports_credentials=True,
+     origins=[
+         "http://localhost:3000",  # Local development
+         "https://yellowstonexps.netlify.app"  # Netlify production
+     ])
 
 # Configure session
 app.secret_key = SECRET_KEY
@@ -50,33 +77,6 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 # Create upload directories
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(PROFILE_PHOTOS_FOLDER, exist_ok=True)
-
-# MySQL Database Configuration
-# Import production config if available, otherwise use development config
-try:
-    from config_production import DB_CONFIG, SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD, SECRET_KEY, FLASK_ENV, UPLOAD_FOLDER, PROFILE_PHOTOS_FOLDER
-    print("Using production configuration")
-except ImportError:
-    # Development configuration (fallback)
-    DB_CONFIG = {
-        'host': 'localhost',
-        'user': 'root',
-        'password': 'deevammaini',
-        'database': 'vendor_management',
-        'charset': 'utf8mb4',
-        'collation': 'utf8mb4_unicode_ci'
-    }
-    
-    SMTP_SERVER = "smtp.gmail.com"
-    SMTP_PORT = 587
-    SMTP_USERNAME = "deevam.maini0412@gmail.com"
-    SMTP_PASSWORD = "kukv vgal lsif cuhn"
-    ADMIN_EMAIL = "deevam.maini0412@gmail.com"
-    SECRET_KEY = secrets.token_hex(16)
-    FLASK_ENV = "development"
-    UPLOAD_FOLDER = "uploads"
-    PROFILE_PHOTOS_FOLDER = "profile_photos"
-    print("Using development configuration")
 
 # Current logged-in user details
 CURRENT_USER = {

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Lock, User, Building, AlertCircle } from 'lucide-react';
 import { apiCall } from '../utils/api';
 
@@ -7,6 +8,7 @@ const LoginScreen = ({ onLogin, onRegister }) => {
   const [credentials, setCredentials] = useState({ username: '', password: '', employeeId: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const navigate = useNavigate();
 
   const handleLogin = async () => {
     setLoading(true);
@@ -38,6 +40,8 @@ const LoginScreen = ({ onLogin, onRegister }) => {
       
       if (response.success) {
         onLogin({ ...response.user, userType });
+        // Redirect to the appropriate route after successful login
+        navigate(`/${userType}`);
       } else {
         setError(response.message || 'Login failed');
       }
@@ -166,7 +170,7 @@ const LoginScreen = ({ onLogin, onRegister }) => {
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600 mb-2">Don't have an account?</p>
             <button
-              onClick={onRegister}
+              onClick={() => navigate('/register')}
               className="text-amber-600 hover:text-amber-700 font-medium"
             >
               Create Account →

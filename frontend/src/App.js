@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import LoginScreen from './components/LoginScreen';
 import RegistrationScreen from './components/RegistrationScreen';
 import AdminDashboard from './components/AdminDashboard';
@@ -59,28 +60,85 @@ const App = () => {
     );
   }
 
-  if (!user) {
-    if (showRegistration) {
-      return <RegistrationScreen onBack={() => setShowRegistration(false)} onLogin={handleLogin} />;
-    }
-    return <LoginScreen onLogin={handleLogin} onRegister={() => setShowRegistration(true)} />;
-  }
+  return (
+    <Router>
+      <AppRoutes 
+        user={user} 
+        onLogin={handleLogin} 
+        onLogout={handleLogout}
+        showRegistration={showRegistration}
+        setShowRegistration={setShowRegistration}
+      />
+    </Router>
+  );
+};
 
-  // Route to appropriate dashboard based on user type
-  if (user.userType === 'admin' || user.user_type === 'admin') {
-    return <AdminDashboard user={user} onLogout={handleLogout} />;
-  } else if (user.userType === 'employee' || user.user_type === 'employee') {
-    return <EmployeeDashboard user={user} onLogout={handleLogout} />;
-  } else if (user.userType === 'vendor' || user.user_type === 'vendor') {
-    // Check if vendor has full access
-    if (user.has_full_access) {
-      return <VendorPortalFullAccess user={user} onLogout={handleLogout} />;
-    } else {
-      return <VendorPortal user={user} onLogout={handleLogout} />;
+const AppRoutes = ({ user, onLogin, onLogout, showRegistration, setShowRegistration }) => {
+  // Protected route component
+  const ProtectedRoute = ({ children, allowedUserTypes }) => {
+    if (!user) {
+      return <Navigate to="/" replace />;
     }
-  }
+    
+    const userType = user.userType || user.user_type;
+    if (!allowedUserTypes.includes(userType)) {
+      return <Navigate to="/" replace />;
+    }
+    
+    return children;
+  };
 
-  return <LoginScreen onLogin={handleLogin} onRegister={() => setShowRegistration(true)} />;
+  return (
+    <Routes>
+      {/* Root route - show login page */}
+      <Route path="/" element={
+        !user ? (
+          showRegistration ? (
+            <RegistrationScreen onBack={() => setShowRegistration(false)} onLogin={onLogin} />
+          ) : (
+            <LoginScreen onLogin={onLogin} onRegister={() => setShowRegistration(true)} />
+          )
+        ) : (
+          <Navigate to={`/${user?.userType || user?.user_type || 'admin'}`} replace />
+        )
+      } />
+      
+      {/* Dashboard routes - only accessible after login */}
+      <Route path="/admin" element={
+        <ProtectedRoute allowedUserTypes={['admin']}>
+          <AdminDashboard user={user} onLogout={onLogout} />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/employee" element={
+        <ProtectedRoute allowedUserTypes={['employee']}>
+          <EmployeeDashboard user={user} onLogout={onLogout} />
+        </ProtectedRoute>
+      } />
+      
+      <Route path="/vendor" element={
+        <ProtectedRoute allowedUserTypes={['vendor']}>
+          {user && user.has_full_access ? (
+            <VendorPortalFullAccess user={user} onLogout={onLogout} />
+          ) : (
+            <VendorPortal user={user} onLogout={onLogout} />
+          )}
+        </ProtectedRoute>
+      } />
+      
+      {/* Registration route */}
+      <Route path="/register" element={
+        showRegistration ? (
+          <RegistrationScreen onBack={() => setShowRegistration(false)} onLogin={onLogin} />
+        ) : (
+          <Navigate to="/" replace />
+        )
+      } />
+      
+      {/* Catch all route */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 };
 
 export default App;
