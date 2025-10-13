@@ -423,7 +423,7 @@ def get_current_user():
         
         if user_type == 'admin':
             # Query admin from admins table
-            query = "SELECT * FROM admins WHERE id = %s AND is_active = TRUE"
+            query = "SELECT * FROM admins WHERE id = %s AND is_active = 1"
             user = execute_query(query, (user_id,), fetch_one=True)
             
             if not user:
@@ -465,7 +465,7 @@ def get_current_user():
             
         elif user_type == 'vendor':
             # Query vendor from vendor_logins table
-            query = "SELECT vl.*, v.company_name, v.contact_person FROM vendor_logins vl JOIN vendors v ON vl.vendor_id = v.id WHERE vl.vendor_id = %s AND vl.is_active = TRUE"
+            query = "SELECT vl.*, v.company_name, v.contact_person FROM vendor_logins vl JOIN vendors v ON vl.vendor_id = v.id WHERE vl.vendor_id = %s AND vl.is_active = 1"
             user = execute_query(query, (user_id,), fetch_one=True)
             
             if not user:
@@ -508,7 +508,7 @@ def vendor_login():
         FROM vendor_logins vl 
         JOIN vendors v ON vl.vendor_id = v.id 
         LEFT JOIN vendor_registrations vr ON vr.email = vl.email
-        WHERE vl.email = %s AND vl.is_active = TRUE
+        WHERE vl.email = %s AND vl.is_active = 1
         """
         vendor = execute_query(query, (email,), fetch_one=True)
         
@@ -760,7 +760,7 @@ def admin_login():
             return jsonify({'success': False, 'message': 'Username and password are required'}), 400
         
         # Query admin from admins table - check both email and username for admin login
-        query = "SELECT * FROM admins WHERE (email = %s OR username = %s) AND is_active = TRUE"
+        query = "SELECT * FROM admins WHERE (email = %s OR username = %s) AND is_active = 1"
         admin = execute_query(query, (username, username), fetch_one=True)
         
         if not admin:
@@ -1278,15 +1278,26 @@ def approve_vendor_registration(registration_id):
             ))
             
             # Create vendor user account for login
-            user_query = """
-            INSERT INTO users (email, password_hash, name, user_type, created_at)
-            VALUES (%s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE password_hash = %s, user_type = %s, updated_at = %s
-            """
-            execute_query(user_query, (
-                registration['email'], password_hash, registration['contact_person'], 'vendor', datetime.now(),
-                password_hash, 'vendor', datetime.now()
-            ))
+            # Check if user already exists
+            check_query = "SELECT id FROM users WHERE email = %s"
+            existing_user = execute_query(check_query, (registration['email'],), fetch_one=True)
+            
+            if existing_user:
+                # Update existing user
+                user_query = """
+                UPDATE users SET password_hash = %s, user_type = %s, updated_at = %s
+                WHERE email = %s
+                """
+                execute_query(user_query, (password_hash, 'vendor', datetime.now(), registration['email']))
+            else:
+                # Insert new user
+                user_query = """
+                INSERT INTO users (email, password_hash, name, user_type, created_at)
+                VALUES (%s, %s, %s, %s, %s)
+                """
+                execute_query(user_query, (
+                    registration['email'], password_hash, registration['contact_person'], 'vendor', datetime.now()
+                ))
         
         # Send approval email with login credentials
         try:
@@ -2507,13 +2518,24 @@ def send_nda():
         # Generate unique reference number
         reference_number = generate_reference_number()
         
-        # Insert vendor into database with reference number
-        query = """
-        INSERT INTO vendors (email, company_name, nda_status, reference_number, created_at)
-        VALUES (%s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE company_name = %s, reference_number = %s, updated_at = %s
-        """
-        execute_query(query, (email, company_name, 'sent', reference_number, datetime.now(), company_name, reference_number, datetime.now()))
+        # Check if vendor already exists
+        check_query = "SELECT id FROM vendors WHERE email = %s"
+        existing_vendor = execute_query(check_query, (email,), fetch_one=True)
+        
+        if existing_vendor:
+            # Update existing vendor
+            query = """
+            UPDATE vendors SET company_name = %s, reference_number = %s, updated_at = %s
+            WHERE email = %s
+            """
+            execute_query(query, (company_name, reference_number, datetime.now(), email))
+        else:
+            # Insert new vendor
+            query = """
+            INSERT INTO vendors (email, company_name, nda_status, reference_number, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            execute_query(query, (email, company_name, 'sent', reference_number, datetime.now()))
         
         # Send email with NDA form
         try:
@@ -3115,8 +3137,9 @@ def mark_notification_as_read():
         # Insert or update the read status
         query = """
         INSERT INTO user_notifications (user_id, notification_type, notification_id, is_read, read_at)
-        VALUES (%s, %s, %s, TRUE, NOW())
-        ON DUPLICATE KEY UPDATE is_read = TRUE, read_at = NOW()
+        VALUES (%s, %s, %s, 1, NOW())
+        ON CONFLICT (user_id, notification_type, notification_id) 
+        DO UPDATE SET is_read = 1, read_at = NOW()
         """
         
         execute_query(query, (user_id, notification_type, notification_id))
@@ -3239,37 +3262,53 @@ def approve_vendor_portal_access(vendor_id):
         execute_query(query, (vendor_id,))
         print("Updated vendor status to approved")
         
-        # Create vendor user account
-        query = """
-        INSERT INTO users (email, password_hash, name, user_type, created_at)
-        VALUES (%s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE password_hash = %s, user_type = %s, updated_at = %s
-        """
-        execute_query(query, (
-            vendor['email'], password_hash, vendor['contact_person'], 'vendor', datetime.now(),
-            password_hash, 'vendor', datetime.now()
-        ))
+        # Check if user already exists
+        check_query = "SELECT id FROM users WHERE email = %s"
+        existing_user = execute_query(check_query, (vendor['email'],), fetch_one=True)
+        
+        if existing_user:
+            # Update existing user
+            query = """
+            UPDATE users SET password_hash = %s, user_type = %s, updated_at = %s
+            WHERE email = %s
+            """
+            execute_query(query, (password_hash, 'vendor', datetime.now(), vendor['email']))
+        else:
+            # Insert new user
+            query = """
+            INSERT INTO users (email, password_hash, name, user_type, created_at)
+            VALUES (%s, %s, %s, %s, %s)
+            """
+            execute_query(query, (vendor['email'], password_hash, vendor['contact_person'], 'vendor', datetime.now()))
         print("Created/updated vendor user account")
         
-        # Create vendor login credentials in vendor_logins table
-        login_query = """
-        INSERT INTO vendor_logins (vendor_id, email, password_hash, company_name, contact_person, phone, address, is_active)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE password_hash = %s, is_active = %s, updated_at = %s
-        """
-        execute_query(login_query, (
-            vendor['id'],
-            vendor['email'],
-            password_hash,
-            vendor['company_name'],
-            vendor['contact_person'],
-            vendor['phone'],
-            vendor['address'],
-            True,
-            password_hash,
-            True,
-            datetime.now()
-        ))
+        # Check if vendor login already exists
+        check_query = "SELECT id FROM vendor_logins WHERE email = %s"
+        existing_login = execute_query(check_query, (vendor['email'],), fetch_one=True)
+        
+        if existing_login:
+            # Update existing vendor login
+            login_query = """
+            UPDATE vendor_logins SET password_hash = %s, is_active = %s, updated_at = %s
+            WHERE email = %s
+            """
+            execute_query(login_query, (password_hash, 1, datetime.now(), vendor['email']))
+        else:
+            # Insert new vendor login
+            login_query = """
+            INSERT INTO vendor_logins (vendor_id, email, password_hash, company_name, contact_person, phone, address, is_active)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """
+            execute_query(login_query, (
+                vendor['id'],
+                vendor['email'],
+                password_hash,
+                vendor['company_name'],
+                vendor['contact_person'],
+                vendor['phone'],
+                vendor['address'],
+                1
+            ))
         print("Created/updated vendor login credentials")
         
         # Send approval email with login credentials
@@ -3980,17 +4019,12 @@ def upload_admin_signature():
         if not signature_data:
             return jsonify({'success': False, 'message': 'Signature data is required'}), 400
         
-        # Store admin signature in database (you might want to create a separate table for this)
-        # For now, we'll store it in a simple way
+        # Store admin signature in database
         query = """
         INSERT INTO admin_signatures (signature_data, signature_type, created_at)
         VALUES (%s, %s, %s)
-        ON DUPLICATE KEY UPDATE signature_data = %s, signature_type = %s, updated_at = %s
         """
-        execute_query(query, (
-            signature_data, signature_type, datetime.now(),
-            signature_data, signature_type, datetime.now()
-        ))
+        execute_query(query, (signature_data, signature_type, datetime.now()))
         
         return jsonify({'success': True, 'message': 'Admin signature uploaded successfully'})
         
