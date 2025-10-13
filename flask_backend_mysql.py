@@ -108,10 +108,18 @@ def generate_vendor_password():
 def get_db_connection():
     """Get PostgreSQL database connection"""
     try:
+        print(f"🔍 Attempting to connect to database...")
+        print(f"Host: {DB_CONFIG.get('host', 'NOT_SET')}")
+        print(f"Port: {DB_CONFIG.get('port', 'NOT_SET')}")
+        print(f"User: {DB_CONFIG.get('user', 'NOT_SET')}")
+        print(f"Database: {DB_CONFIG.get('database', 'NOT_SET')}")
+        
         connection = pg8000.connect(**DB_CONFIG)
+        print("✅ Database connection successful!")
         return connection
     except Error as e:
-        print(f"Error connecting to PostgreSQL: {e}")
+        print(f"❌ Error connecting to PostgreSQL: {e}")
+        print(f"❌ Connection details: {DB_CONFIG}")
         return None
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
