@@ -3,30 +3,16 @@
 
 import os
 
-# Database Configuration - Supports both PostgreSQL (Supabase) and MySQL
-# Environment variables override defaults
-DB_TYPE = os.environ.get('DB_TYPE', 'postgresql')  # 'postgresql' or 'mysql'
-
-if DB_TYPE == 'mysql':
-    # MySQL Configuration (for local development or MySQL cloud)
-    DB_CONFIG = {
-        'host': os.environ.get('DB_HOST', 'localhost'),
-        'user': os.environ.get('DB_USER', 'root'),
-        'password': os.environ.get('DB_PASSWORD', 'deevammaini'),
-        'database': os.environ.get('DB_NAME', 'vendor_management'),
-        'port': int(os.environ.get('DB_PORT', '3306')),
-        'charset': 'utf8mb4',
-        'collation': 'utf8mb4_unicode_ci'
-    }
-else:
-    # PostgreSQL Configuration (Supabase)
-    DB_CONFIG = {
-        'host': os.environ.get('DB_HOST', 'aws-1-ap-south-1.pooler.supabase.com'),  # Supabase Session Pooler
-        'user': os.environ.get('DB_USER', 'postgres.chrnpxnqfsvyaidiftjq'),   # Supabase user
-        'password': os.environ.get('DB_PASSWORD', 'your-supabase-password'),  # Your Supabase password
-        'database': os.environ.get('DB_NAME', 'postgres'),  # Supabase database name
-        'port': int(os.environ.get('DB_PORT', '5432'))
-    }
+# MySQL Database Configuration
+DB_CONFIG = {
+    'host': os.environ.get('DB_HOST', 'localhost'),
+    'user': os.environ.get('DB_USER', 'root'),
+    'password': os.environ.get('DB_PASSWORD', 'deevammaini'),
+    'database': os.environ.get('DB_NAME', 'vendor_management'),
+    'port': int(os.environ.get('DB_PORT', '3306')),
+    'charset': 'utf8mb4',
+    'collation': 'utf8mb4_unicode_ci'
+}
 
 # Production Email Configuration
 SMTP_SERVER = os.environ.get('SMTP_SERVER', 'smtp.gmail.com')
