@@ -121,7 +121,7 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         return None
     
     try:
-        cursor = connection.cursor(dictionary=True)
+        cursor = connection.cursor()
         cursor.execute(query, params)
         
         if fetch_one:
@@ -129,7 +129,7 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         elif fetch_all:
             result = cursor.fetchall()
         else:
-            result = cursor.lastrowid
+            result = None
         
         connection.commit()
         return result
