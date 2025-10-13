@@ -118,6 +118,9 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
     """Execute PostgreSQL query and return results as dictionaries"""
     connection = get_db_connection()
     if not connection:
+        print("❌ No database connection available")
+        if fetch_all:
+            return []  # Return empty list for fetch_all queries
         return None
     
     try:
@@ -139,16 +142,18 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
                 column_names = [desc[0] for desc in cursor.description]
                 # Convert tuples to dictionaries
                 return [dict(zip(column_names, row)) for row in results]
-            return []
+            return []  # Return empty list instead of None
         else:
             result = None
         
         connection.commit()
         return result
     except Error as e:
-        print(f"Error executing query: {e}")
+        print(f"❌ Database query error: {e}")
         print(f"Query: {query}")
         print(f"Params: {params}")
+        if fetch_all:
+            return []  # Return empty list for fetch_all queries
         return None
     finally:
         try:
