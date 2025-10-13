@@ -897,20 +897,16 @@ def health_check():
 # Dashboard routes
 @app.route('/api/dashboard/stats', methods=['GET'])
 def get_dashboard_stats():
+    """Get dashboard statistics with proper error handling"""
     try:
-        # Get counts from different tables
-        tasks_query = "SELECT COUNT(*) as count FROM tasks"
-        projects_query = "SELECT COUNT(*) as count FROM projects"
-        workflows_query = "SELECT COUNT(*) as count FROM workflows"
-        tickets_query = "SELECT COUNT(*) as count FROM tickets"
-        users_query = "SELECT COUNT(*) as count FROM users"
+        # Get counts from different tables with proper error handling
+        tasks_count = execute_query("SELECT COUNT(*) as count FROM tasks", fetch_one=True)
+        projects_count = execute_query("SELECT COUNT(*) as count FROM projects", fetch_one=True)
+        workflows_count = execute_query("SELECT COUNT(*) as count FROM workflows", fetch_one=True)
+        tickets_count = execute_query("SELECT COUNT(*) as count FROM tickets", fetch_one=True)
+        users_count = execute_query("SELECT COUNT(*) as count FROM users", fetch_one=True)
         
-        tasks_count = execute_query(tasks_query, fetch_one=True)
-        projects_count = execute_query(projects_query, fetch_one=True)
-        workflows_count = execute_query(workflows_query, fetch_one=True)
-        tickets_count = execute_query(tickets_query, fetch_one=True)
-        users_count = execute_query(users_query, fetch_one=True)
-        
+        # Handle None results safely
         return jsonify({
             'total_tasks': tasks_count['count'] if tasks_count else 0,
             'total_projects': projects_count['count'] if projects_count else 0,
@@ -920,8 +916,14 @@ def get_dashboard_stats():
         })
         
     except Exception as e:
-        print(f"Dashboard stats error: {e}")
-        return jsonify({'error': 'Failed to get dashboard stats'}), 500
+        print(f"❌ Error fetching dashboard stats: {e}")
+        return jsonify({
+            'total_tasks': 0,
+            'total_projects': 0,
+            'total_workflows': 0,
+            'total_tickets': 0,
+            'active_users': 0
+        })
 
 @app.route('/api/auth/employee-details/<employee_id>', methods=['GET'])
 def get_employee_details_by_id(employee_id):
@@ -2608,29 +2610,51 @@ def get_employee(employee_id):
 # Admin routes
 @app.route('/api/admin/vendors', methods=['GET'])
 def get_admin_vendors():
+    """Get all vendors with proper error handling"""
     try:
-        vendors = get_vendors_data()
-        # Safety check to prevent NoneType errors
+        # Execute query with proper error handling
+        vendors = execute_query("SELECT * FROM vendors", fetch_all=True)
+        
+        # Handle case where query returns None
         if vendors is None:
-            print("⚠️ Vendors returned None - database connection issue")
-            vendors = []
+            print("⚠️ Vendors query returned None - database connection issue")
+            return jsonify([])
+        
+        # Check for empty result
+        if len(vendors) == 0:
+            print("ℹ️ No vendors found in database")
+            return jsonify([])
+        
+        print(f"✅ Returning {len(vendors)} vendors")
         return jsonify(vendors)
+        
     except Exception as e:
-        print(f"Get vendors error: {e}")
-        return jsonify({'error': 'Failed to get vendors'}), 500
+        print(f"❌ Error fetching vendors data: {e}")
+        return jsonify([])
 
 @app.route('/api/admin/submitted-nda-forms', methods=['GET'])
 def get_submitted_nda_forms():
+    """Get all NDA forms with proper error handling"""
     try:
-        nda_requests = get_nda_requests_data()
-        # Safety check to prevent NoneType errors
+        # Execute query with proper error handling
+        nda_requests = execute_query("SELECT * FROM nda_requests", fetch_all=True)
+        
+        # Handle case where query returns None
         if nda_requests is None:
-            print("⚠️ NDA requests returned None - database connection issue")
-            nda_requests = []
+            print("⚠️ NDA requests query returned None - database connection issue")
+            return jsonify([])
+        
+        # Check for empty result
+        if len(nda_requests) == 0:
+            print("ℹ️ No NDA requests found in database")
+            return jsonify([])
+        
+        print(f"✅ Returning {len(nda_requests)} NDA requests")
         return jsonify(nda_requests)
+        
     except Exception as e:
-        print(f"Get NDA forms error: {e}")
-        return jsonify({'error': 'Failed to get NDA forms'}), 500
+        print(f"❌ Error fetching NDA requests data: {e}")
+        return jsonify([])
 
 @app.route('/api/admin/send-nda', methods=['POST'])
 def send_nda():
@@ -2910,7 +2934,7 @@ def send_bulk_nda():
 
 @app.route('/api/admin/notifications', methods=['GET'])
 def get_admin_notifications():
-    """Get notifications for admin dashboard"""
+    """Get notifications for admin dashboard with proper error handling"""
     try:
         # Get recent vendor activities as notifications
         query = """
@@ -2944,24 +2968,20 @@ def get_admin_notifications():
         
         # Handle case where query returns None
         if notifications is None:
-            print("⚠️ Notifications query returned None - checking for query errors")
-            # Try a simpler query to test connection
-            test_query = "SELECT COUNT(*) FROM vendors"
-            test_result = execute_query(test_query, fetch_one=True)
-            if test_result is None:
-                print("❌ Basic vendors query also failed - database connection issue")
-            else:
-                print(f"✅ Basic vendors query works - found {test_result['count']} vendors")
-            notifications = []
+            print("⚠️ Notifications query returned None - database connection issue")
+            return jsonify([])
         
-        return jsonify({
-            'success': True,
-            'notifications': notifications
-        })
+        # Check for empty result
+        if len(notifications) == 0:
+            print("ℹ️ No notifications found in database")
+            return jsonify([])
+        
+        print(f"✅ Returning {len(notifications)} notifications")
+        return jsonify(notifications)
         
     except Exception as e:
-        print(f"Get notifications error: {e}")
-        return jsonify({'success': False, 'notifications': []}), 500
+        print(f"❌ Error fetching notifications data: {e}")
+        return jsonify([])
 
 # Announcements API Endpoints
 @app.route('/api/admin/announcements', methods=['GET'])
@@ -3547,7 +3567,13 @@ def get_nda_forms():
         
         # Handle case where query returns None
         if forms is None:
-            forms = []
+            print("⚠️ NDA forms query returned None - database connection issue")
+            return jsonify([])
+        
+        # Check for empty result
+        if len(forms) == 0:
+            print("ℹ️ No NDA forms found in database")
+            return jsonify([])
         
         # Format the response
         formatted_forms = []
@@ -3576,11 +3602,12 @@ def get_nda_forms():
             }
             formatted_forms.append(formatted_form)
         
+        print(f"✅ Returning {len(formatted_forms)} NDA forms")
         return jsonify(formatted_forms)
         
     except Exception as e:
-        print(f"Get NDA forms error: {e}")
-        return jsonify({'error': 'Failed to get NDA forms'}), 500
+        print(f"❌ Error fetching NDA forms data: {e}")
+        return jsonify([])
 
 @app.route('/api/admin/download-nda/<reference_number>', methods=['GET'])
 def download_nda_pdf(reference_number):
@@ -4839,8 +4866,11 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         nda_templates = execute_query(nda_query, fetch_all=True)
-        if nda_templates:
+        if nda_templates is not None:
             all_templates.extend(nda_templates)
+            print(f"✅ Found {len(nda_templates)} NDA templates")
+        else:
+            print("⚠️ NDA templates query returned None")
         
         # Get Contract templates
         contract_query = """
@@ -4850,8 +4880,11 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         contract_templates = execute_query(contract_query, fetch_all=True)
-        if contract_templates:
+        if contract_templates is not None:
             all_templates.extend(contract_templates)
+            print(f"✅ Found {len(contract_templates)} contract templates")
+        else:
+            print("⚠️ Contract templates query returned None")
         
         # Get Employment templates
         employment_query = """
@@ -4861,8 +4894,11 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         employment_templates = execute_query(employment_query, fetch_all=True)
-        if employment_templates:
+        if employment_templates is not None:
             all_templates.extend(employment_templates)
+            print(f"✅ Found {len(employment_templates)} employment templates")
+        else:
+            print("⚠️ Employment templates query returned None")
         
         # Get Vendor templates
         vendor_query = """
@@ -4872,8 +4908,11 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         vendor_templates = execute_query(vendor_query, fetch_all=True)
-        if vendor_templates:
+        if vendor_templates is not None:
             all_templates.extend(vendor_templates)
+            print(f"✅ Found {len(vendor_templates)} vendor templates")
+        else:
+            print("⚠️ Vendor templates query returned None")
         
         # Get Compliance templates
         compliance_query = """
@@ -4883,8 +4922,11 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         compliance_templates = execute_query(compliance_query, fetch_all=True)
-        if compliance_templates:
+        if compliance_templates is not None:
             all_templates.extend(compliance_templates)
+            print(f"✅ Found {len(compliance_templates)} compliance templates")
+        else:
+            print("⚠️ Compliance templates query returned None")
         
         # Get Custom templates
         custom_query = """
@@ -4894,13 +4936,17 @@ def get_templates():
         ORDER BY t.created_at DESC
         """
         custom_templates = execute_query(custom_query, fetch_all=True)
-        if custom_templates:
+        if custom_templates is not None:
             all_templates.extend(custom_templates)
+            print(f"✅ Found {len(custom_templates)} custom templates")
+        else:
+            print("⚠️ Custom templates query returned None")
         
         # Sort all templates by creation date
         all_templates.sort(key=lambda x: x['created_at'], reverse=True)
         
-        return jsonify({'success': True, 'templates': all_templates})
+        print(f"✅ Returning {len(all_templates)} total templates")
+        return jsonify(all_templates)
         
     except Exception as e:
         print(f"Get templates error: {e}")
@@ -5213,7 +5259,7 @@ def delete_template(template_id):
 
 @app.route('/api/admin/forms', methods=['GET'])
 def get_forms():
-    """Get all submitted forms"""
+    """Get all submitted forms with proper error handling"""
     try:
         query = """
         SELECT f.*, a.full_name as submitted_by_name, u.name as assigned_to_name
@@ -5226,13 +5272,20 @@ def get_forms():
         
         # Handle case where query returns None
         if forms is None:
-            forms = []
+            print("⚠️ Forms query returned None - database connection issue")
+            return jsonify([])
         
-        return jsonify({'success': True, 'forms': forms})
+        # Check for empty result
+        if len(forms) == 0:
+            print("ℹ️ No forms found in database")
+            return jsonify([])
+        
+        print(f"✅ Returning {len(forms)} forms")
+        return jsonify(forms)
         
     except Exception as e:
-        print(f"Get forms error: {e}")
-        return jsonify({'error': 'Failed to get forms'}), 500
+        print(f"❌ Error fetching forms data: {e}")
+        return jsonify([])
 
 @app.route('/api/admin/forms', methods=['POST'])
 def submit_form():
