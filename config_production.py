@@ -5,10 +5,10 @@ import os
 
 # Production Database Configuration for PostgreSQL/Supabase
 DB_CONFIG = {
-    'host': os.environ.get('DB_HOST', 'db.your-project.supabase.co'),
-    'user': os.environ.get('DB_USER', 'postgres'),
-    'password': os.environ.get('DB_PASSWORD', 'your-supabase-password'),
-    'database': os.environ.get('DB_NAME', 'postgres'),
+    'host': os.environ.get('DB_HOST', 'localhost'),  # Change to your actual Supabase host
+    'user': os.environ.get('DB_USER', 'postgres'),   # Change to your actual Supabase user
+    'password': os.environ.get('DB_PASSWORD', 'your-actual-password'),  # Change to your actual password
+    'database': os.environ.get('DB_NAME', 'postgres'),  # Change to your actual database name
     'port': int(os.environ.get('DB_PORT', '5432'))
 }
 
