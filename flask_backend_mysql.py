@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Flask backend for Yellowstone Management Portal with PostgreSQL/Supabase
+# Flask backend for Yellowstone Management Portal with MySQL
 
 from flask import Flask, jsonify, request, send_file, session, send_from_directory, redirect, make_response
 from flask_cors import CORS
@@ -327,7 +327,7 @@ def save_ticket(ticket_data):
         return None
 
 def get_vendors_data():
-    """Get all vendors from PostgreSQL"""
+    """Get all vendors from MySQL"""
     try:
         # First check if table exists
         table_check = execute_query("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'vendors')", fetch_one=True)
@@ -349,7 +349,7 @@ def get_vendors_data():
         return []
 
 def get_nda_requests_data():
-    """Get all NDA requests from PostgreSQL"""
+    """Get all NDA requests from MySQL"""
     try:
         # First check if table exists
         table_check = execute_query("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'nda_requests')", fetch_one=True)
