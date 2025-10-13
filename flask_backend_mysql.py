@@ -56,7 +56,8 @@ CORS(app,
      supports_credentials=True,
      origins=[
          "http://localhost:3000",  # Local development
-         "https://yellowstonexps.netlify.app"  # Netlify production
+         "https://yellowstonexps.netlify.app",  # Netlify production
+         "https://yellowstonevendormanagement.netlify.app"  # Your actual Netlify domain
      ])
 
 # Configure session
