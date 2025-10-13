@@ -2829,8 +2829,8 @@ def get_admin_notifications():
         query = """
         SELECT 
             'vendor_nda_submitted' as type,
-            ('NDA Submitted by ' || company_name) as title,
-            ('New NDA form submitted by ' || company_name || ' (' || contact_person || ')') as message,
+            ('NDA Submitted by ' || COALESCE(company_name, 'Unknown Company')) as title,
+            ('New NDA form submitted by ' || COALESCE(company_name, 'Unknown Company') || ' (' || COALESCE(contact_person, 'Unknown Contact') || ')') as message,
             created_at,
             id as reference_id
         FROM vendors 
@@ -2841,8 +2841,8 @@ def get_admin_notifications():
         
         SELECT 
             'vendor_approved' as type,
-            ('Vendor Approved: ' || company_name) as title,
-            ('Portal access granted to ' || company_name) as message,
+            ('Vendor Approved: ' || COALESCE(company_name, 'Unknown Company')) as title,
+            ('Portal access granted to ' || COALESCE(company_name, 'Unknown Company')) as message,
             updated_at as created_at,
             id as reference_id
         FROM vendors 
@@ -2857,6 +2857,14 @@ def get_admin_notifications():
         
         # Handle case where query returns None
         if notifications is None:
+            print("⚠️ Notifications query returned None - checking for query errors")
+            # Try a simpler query to test connection
+            test_query = "SELECT COUNT(*) FROM vendors"
+            test_result = execute_query(test_query, fetch_one=True)
+            if test_result is None:
+                print("❌ Basic vendors query also failed - database connection issue")
+            else:
+                print(f"✅ Basic vendors query works - found {test_result['count']} vendors")
             notifications = []
         
         return jsonify({
