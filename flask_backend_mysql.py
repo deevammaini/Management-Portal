@@ -115,7 +115,7 @@ def get_db_connection():
         return None
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
-    """Execute PostgreSQL query"""
+    """Execute PostgreSQL query and return results as dictionaries"""
     connection = get_db_connection()
     if not connection:
         return None
@@ -126,8 +126,20 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         
         if fetch_one:
             result = cursor.fetchone()
+            if result:
+                # Get column names
+                column_names = [desc[0] for desc in cursor.description]
+                # Convert tuple to dictionary
+                return dict(zip(column_names, result))
+            return None
         elif fetch_all:
-            result = cursor.fetchall()
+            results = cursor.fetchall()
+            if results:
+                # Get column names
+                column_names = [desc[0] for desc in cursor.description]
+                # Convert tuples to dictionaries
+                return [dict(zip(column_names, row)) for row in results]
+            return []
         else:
             result = None
         
