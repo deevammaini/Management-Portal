@@ -467,7 +467,7 @@ const VendorPortal = ({ user, onLogout }) => {
                   • Agreement Type: Non-Disclosure Agreement<br/>
                   • Status: Completed and Approved<br/>
                   • Completion Date: {new Date().toLocaleDateString()}<br/>
-                  • Reference Number: NDA-{Math.random().toString(36).substr(2, 9).toUpperCase()}
+                  • Reference Number: {user.reference_number || 'N/A'}
                 </p>
               </div>
             </div>

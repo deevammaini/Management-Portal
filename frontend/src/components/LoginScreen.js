@@ -166,6 +166,22 @@ const LoginScreen = ({ onLogin, onRegister }) => {
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
 
+          {/* Vendor Registration Form Button */}
+          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+            <div className="text-center">
+              <p className="text-sm text-blue-800 mb-3 font-medium">Vendor Registration</p>
+              <button
+                onClick={() => navigate('/vendor-registration')}
+                className="w-full py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+              >
+                Vendor Registration Form
+              </button>
+              <p className="text-xs text-blue-600 mt-2">
+                Use your temporary credentials from NDA completion email
+              </p>
+            </div>
+          </div>
+
           {/* Registration Link */}
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600 mb-2">Don't have an account?</p>

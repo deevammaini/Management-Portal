@@ -52,8 +52,17 @@ CREATE TABLE IF NOT EXISTS vendors (
     phone VARCHAR(20),
     address TEXT,
     business_type VARCHAR(255),
+    registration_number VARCHAR(100),
+    country VARCHAR(100),
+    state VARCHAR(100),
     registration_status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
-    nda_status ENUM('pending', 'completed', 'expired') DEFAULT 'pending',
+    nda_status ENUM('pending', 'sent', 'completed', 'expired') DEFAULT 'pending',
+    reference_number VARCHAR(50) UNIQUE,
+    signature_data TEXT,
+    company_stamp_data TEXT,
+    signature_type ENUM('draw', 'upload') DEFAULT 'draw',
+    signed_date TIMESTAMP NULL,
+    portal_access BOOLEAN DEFAULT FALSE,
     has_full_access BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -189,6 +198,8 @@ ON DUPLICATE KEY UPDATE name=name;
 -- Create indexes for better performance
 CREATE INDEX idx_vendors_email ON vendors(email);
 CREATE INDEX idx_vendors_status ON vendors(registration_status);
+CREATE INDEX idx_vendors_nda_status ON vendors(nda_status);
+CREATE INDEX idx_vendors_reference ON vendors(reference_number);
 CREATE INDEX idx_users_employee_id ON users(employee_id);
 CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_tasks_assigned_to ON tasks(assigned_to);

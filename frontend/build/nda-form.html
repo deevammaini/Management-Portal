@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YellowStone NDA Agreement - Company Details</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-4xl">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-lg p-8 mb-8">
+            <div class="text-center">
+                <h1 class="text-3xl font-bold text-gray-900 mb-2">YellowStone NDA Agreement</h1>
+                <p class="text-gray-600">Step 1: Company Information & Agreement Review</p>
+                <div class="mt-4 p-4 bg-blue-50 rounded-lg">
+                    <p class="text-sm text-blue-800">
+                        <strong>Reference Number:</strong> <span id="referenceNumber" class="font-mono text-lg">Loading...</span>
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Form -->
+        <form id="companyDetailsForm" class="bg-white rounded-lg shadow-lg p-8">
+            <!-- Company Information -->
+            <div class="mb-8">
+                <h2 class="text-2xl font-semibold text-gray-900 mb-6 border-b pb-2">Company Information</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="companyName" class="block text-sm font-medium text-gray-700 mb-2">Company Name *</label>
+                        <input type="text" id="companyName" name="companyName" required 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    
+                    <div>
+                        <label for="contactPerson" class="block text-sm font-medium text-gray-700 mb-2">Contact Person *</label>
+                        <input type="text" id="contactPerson" name="contactPerson" required 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    
+                    <div>
+                        <label for="email" class="block text-sm font-medium text-gray-700 mb-2">Email Address *</label>
+                        <input type="email" id="email" name="email" required 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    
+                    <div>
+                        <label for="phone" class="block text-sm font-medium text-gray-700 mb-2">Phone Number *</label>
+                        <input type="tel" id="phone" name="phone" required 
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+                
+                <div class="mt-6">
+                    <label for="address" class="block text-sm font-medium text-gray-700 mb-2">Business Address *</label>
+                    <textarea id="address" name="address" rows="3" required 
+                              class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                </div>
+            </div>
+
+            <!-- NDA Agreement Text -->
+            <div class="mb-8">
+                <h2 class="text-2xl font-semibold text-gray-900 mb-6 border-b pb-2">Non-Disclosure Agreement</h2>
+                
+                <div class="bg-gray-50 p-6 rounded-lg max-h-96 overflow-y-auto">
+                    <h3 class="text-lg font-semibold mb-4">Confidentiality & Nondisclosure Agreement (NDA)</h3>
+                    
+                    <p class="mb-4">This agreement is entered into on <strong>20, December, 2023</strong>, by and among:</p>
+                    
+                    <p class="mb-4"><strong>(1) YellowStone Xperiences Pvt Ltd</strong>, a company incorporated and existing under the laws of Company Act, India, having its registered office at Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India, registered with the company registration number U72900PB2020PTC051260, hereinafter referred to as <strong>"YSXP"</strong>, And</p>
+                    
+                    <p class="mb-4"><strong>(2) <span id="companyNameDisplay">[Company Name]</span></strong>, a company incorporated and existing under the laws of Company Act, India, having its registered office at <span id="addressDisplay">[Business Address]</span> registered with the company registration number <span id="registrationDisplay">[Registration Number]</span>, hereinafter referred to as <strong>"<span id="companyShortDisplay">[Company]</span>"</strong></p>
+                    
+                    <p class="mb-4">hereinafter also referred to individually as a "Party" and collectively as the "Parties".</p>
+                    
+                    <h4 class="font-semibold mb-2">1. PURPOSE</h4>
+                    <p class="mb-4">In connection with discussions between YellowStone Xperiences Pvt Ltd and <span id="companyNameDisplay2">[Company Name]</span> concerning Company's Local representative under capacity of Strategic Partnership for cross selling of products and services. In order to pursue this Purpose, the Parties recognize that there is a need to disclose certain confidential information by the Disclosing Party (i.e., Party disclosing such information) to Receiving Party (i.e., Party receiving such information) to be used only for this Purpose and to protect such confidential information from unauthorized use and disclosure.</p>
+                    
+                    <h4 class="font-semibold mb-2">2. DEFINITION OF CONFIDENTIAL INFORMATION</h4>
+                    <p class="mb-4">"Confidential Information" shall mean all information, whether disclosed before or after the Effective Date, that is disclosed in written, oral, electronic, visual or other form by either party (each, as a "Disclosing Party") to the other party (each, as a "Receiving Party") and either (i) marked or designated as "confidential" or "proprietary" at the time of disclosure or (ii) otherwise clearly indicated to be confidential at the time of disclosure. IT Confidential Information may include, without limitation, computer programs, software or hardware products, product development plans, sketches, drawings, models, proposed services, discoveries, ideas, concepts, equipment, code, software source documents and related technical information algorithms, know-how, trade secrets, formulas, processes, procedures, ideas, research, inventions (whether patentable or not), copyrights, schematics and other technical, names and expertise of employees and consultants and customer or partner information.</p>
+                    
+                    <h4 class="font-semibold mb-2">3. CONFIDENTIALITY OBLIGATION</h4>
+                    <p class="mb-4">Receiving Party agrees to protect the Confidential Information by using the same degree of care as Receiving Party uses to protect its own confidential or proprietary information (but not less than a reasonable degree of care): (i) to prevent the unauthorized use, dissemination or publication of the Confidential Information (ii) not to divulge Confidential Information to any third party, (iii) not to make any use of such Confidential Information except for the Business Purpose, and (iv) not to copy except as reasonably required in direct support of the Business Purpose.</p>
+                    
+                    <h4 class="font-semibold mb-2">4. NON-DISCLOSURE OF CONFIDENTIAL INFORMATION</h4>
+                    <p class="mb-4">Receiving Party shall only permit access to Confidential Information to those of its employees or authorized representatives who have a need to know and shall not disclose it to third parties.</p>
+                    
+                    <h4 class="font-semibold mb-2">5. RETURN OF CONFIDENTIAL INFORMATION</h4>
+                    <p class="mb-4">All Confidential Information furnished under this Agreement, shall remain the property of the Disclosing Party and shall be returned to it without retaining any copies or it shall be destroyed all documents and other materials promptly upon the termination of this Agreement under the consent of both parties or any breach of contract made by either party.</p>
+                    
+                    <h4 class="font-semibold mb-2">6. TERM</h4>
+                    <p class="mb-4">This Agreement shall come into force from the effective date of this deed and shall continue for two (2) years from the effective Date, unless earlier terminated by either Party with 30 days' prior written notice.</p>
+                    
+                    <h4 class="font-semibold mb-2">7. GOVERNING LAW</h4>
+                    <p class="mb-4">This Agreement shall be governed in all respects in accordance with the laws of Mohali, Punjab, India.</p>
+                    
+                    <h4 class="font-semibold mb-2">8. AMENDMENTS, FILLING, CANCELLATION, TERMINATION AND RENEWAL OF AGREEMENT</h4>
+                    <p class="mb-4">Any term of this Agreement may be amended, filled, cancelled, terminated and renewed under the written mutual consent of the parties. This said all matters shall be done by giving 30 days advance written notice each other.</p>
+                    
+                    <h4 class="font-semibold mb-2">9. REMEDIES</h4>
+                    <p class="mb-4">If a party breaches this NDA, this party must be taken the action under the laws of Mohali, Punjab, India. However, on mutual agreement of both parties the geographical location can be changed and accordingly the law of land would be followed.</p>
+                    
+                    <h4 class="font-semibold mb-2">10. VALID NOTICES</h4>
+                    <p class="mb-4">All notices under this Agreement shall be deemed to have been duly given upon the mailing of the notice, in person or by courier, sent by fax, e-mail to the Party entitled to such notice at the address.</p>
+                    
+                    <p class="mb-4"><strong>If to Yellowstone Xperiences Private Limited:</strong><br>
+                    Postal address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali, Punjab, India (160062).<br>
+                    E-mail: hello@yellowstonexps.com, Harpreet.singh@yellowstonexps.com</p>
+                    
+                    <p class="mb-4"><strong>If to <span id="companyNameDisplay3">[Company Name]</span>:</strong><br>
+                    Postal address: <span id="addressDisplay2">[Business Address]</span><br>
+                    Phone: <span id="phoneDisplay">[Phone Number]</span><br>
+                    E-mail: <span id="emailDisplay">[Email Address]</span></p>
+                    
+                    <h4 class="font-semibold mb-2">11. DISPUTE SETTLEMENT</h4>
+                    <p class="mb-4">If any dispute arises relating to non-disclosure of confidential information, the parties shall perform by negotiation at first. If no decision can be made only, the injured party can sue for compensation in the court.</p>
+                    
+                    <p class="mt-6"><strong>IN WITNESS WHEREOF, the parties have executed this Agreement on the date first written above by their fully authorized representatives with their free consent.</strong></p>
+                    
+                    <p class="mt-6"><strong>By proceeding to the next step, you acknowledge that you have read and understood the terms of this Non-Disclosure Agreement.</strong></p>
+                </div>
+            </div>
+
+            <!-- Agreement Confirmation -->
+            <div class="mb-8">
+                <h2 class="text-2xl font-semibold text-gray-900 mb-6 border-b pb-2">Agreement Confirmation</h2>
+                
+                <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+                    <div class="flex items-start">
+                        <input type="checkbox" id="agreementAccepted" name="agreementAccepted" required 
+                               class="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded">
+                        <label for="agreementAccepted" class="ml-3 text-sm text-gray-700">
+                            <strong>I acknowledge that I have read, understood, and agree to be bound by the terms and conditions of this Non-Disclosure Agreement.</strong> I understand that by proceeding to the signature page, I am entering into a legally binding agreement with YellowStone Xperiences Pvt Ltd.
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Continue Button -->
+            <div class="text-center">
+                <button type="submit" id="continueBtn" 
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-8 rounded-lg text-lg transition duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                    Continue to Digital Signature
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        // Get reference number from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const referenceNumber = urlParams.get('ref') || 'NDA-2025-TEST';
+        document.getElementById('referenceNumber').textContent = referenceNumber;
+
+        // Update dynamic fields in NDA text
+        function updateNDADisplay() {
+            const companyName = document.getElementById('companyName').value || '[Company Name]';
+            const address = document.getElementById('address').value || '[Business Address]';
+            const phone = document.getElementById('phone').value || '[Phone Number]';
+            const email = document.getElementById('email').value || '[Email Address]';
+            
+            // Update all company name displays
+            document.getElementById('companyNameDisplay').textContent = companyName;
+            document.getElementById('companyNameDisplay2').textContent = companyName;
+            document.getElementById('companyNameDisplay3').textContent = companyName;
+            
+            // Update address displays
+            document.getElementById('addressDisplay').textContent = address;
+            document.getElementById('addressDisplay2').textContent = address;
+            
+            // Update phone and email displays
+            document.getElementById('phoneDisplay').textContent = phone;
+            document.getElementById('emailDisplay').textContent = email;
+            
+            // Update company short name (first word)
+            const shortName = companyName.split(' ')[0] || '[Company]';
+            document.getElementById('companyShortDisplay').textContent = shortName;
+        }
+
+        // Add event listeners to update NDA text dynamically
+        document.getElementById('companyName').addEventListener('input', updateNDADisplay);
+        document.getElementById('address').addEventListener('input', updateNDADisplay);
+        document.getElementById('phone').addEventListener('input', updateNDADisplay);
+        document.getElementById('email').addEventListener('input', updateNDADisplay);
+        
+        // Initial update
+        updateNDADisplay();
+
+        // Form submission
+        document.getElementById('companyDetailsForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const continueBtn = document.getElementById('continueBtn');
+            continueBtn.disabled = true;
+            continueBtn.textContent = 'Processing...';
+
+            try {
+                // Get form data
+                const formData = new FormData(this);
+                const data = {
+                    reference_number: referenceNumber,
+                    company_name: formData.get('companyName'),
+                    contact_person: formData.get('contactPerson'),
+                    email: formData.get('email'),
+                    phone: formData.get('phone'),
+                    address: formData.get('address'),
+                    agreement_accepted: formData.get('agreementAccepted') === 'on'
+                };
+
+                // Store data in sessionStorage for next page
+                sessionStorage.setItem('ndaFormData', JSON.stringify(data));
+
+                // Redirect to signature page
+                window.location.href = `/nda-signature?ref=${referenceNumber}`;
+
+            } catch (error) {
+                alert('Error processing form. Please try again.');
+                continueBtn.disabled = false;
+                continueBtn.textContent = 'Continue to Digital Signature';
+            }
+        });
+    </script>
+</body>
+</html>
