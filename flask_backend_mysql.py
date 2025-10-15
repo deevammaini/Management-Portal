@@ -114,15 +114,12 @@ def generate_vendor_password():
 def get_db_connection():
     """Get MySQL database connection"""
     try:
-        print(f"🔍 Attempting to connect to MySQL database...")
-        print(f"Host: {DB_CONFIG.get('host', 'NOT_SET')}")
-        print(f"Port: {DB_CONFIG.get('port', 'NOT_SET')}")
-        print(f"User: {DB_CONFIG.get('user', 'NOT_SET')}")
-        print(f"Database: {DB_CONFIG.get('database', 'NOT_SET')}")
+        # Attempting to connect to MySQL database
+        # Database connection details
         
         import mysql.connector
         connection = mysql.connector.connect(**DB_CONFIG)
-        print("✅ MySQL database connection successful!")
+        # Database connection successful
         return connection
     except Error as e:
         print(f"❌ Error connecting to MySQL: {e}")
@@ -133,7 +130,7 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
     """Execute MySQL query and return results as dictionaries"""
     connection = get_db_connection()
     if not connection:
-        print("❌ No database connection available")
+        # No database connection available
         if fetch_all:
             return []
         return None
@@ -970,7 +967,6 @@ def get_dashboard_stats():
         })
         
     except Exception as e:
-        print(f"❌ Error fetching dashboard stats: {e}")
         return jsonify({
             'total_tasks': 0,
             'total_projects': 0,
@@ -2279,14 +2275,10 @@ def get_admin_nda_forms():
         nda_forms = execute_query(query, fetch_all=True)
         
         if nda_forms is None:
-            print("⚠️ NDA forms query returned None - database connection issue")
             return jsonify([])
-        
-        print(f"✅ Returning {len(nda_forms) if nda_forms else 0} NDA forms")
         return jsonify(nda_forms)
         
     except Exception as e:
-        print(f"❌ Error fetching NDA forms: {e}")
         return jsonify([])
 
 @app.route('/api/admin/vendors', methods=['GET'])
@@ -2296,19 +2288,31 @@ def get_admin_vendors():
         vendors = execute_query("SELECT * FROM vendors", fetch_all=True)
         
         if vendors is None:
-            print("⚠️ Vendors query returned None - database connection issue")
             return jsonify([])
         
         if len(vendors) == 0:
-            print("ℹ️ No vendors found in database")
             return jsonify([])
-        
-        print(f"✅ Returning {len(vendors)} vendors")
         return jsonify(vendors)
         
     except Exception as e:
-        print(f"❌ Error fetching vendors data: {e}")
         return jsonify([])
+
+@app.route('/api/admin/templates', methods=['GET'])
+def get_admin_templates():
+    """Get all form templates for admin view"""
+    try:
+        # For now, return empty templates array since we don't have a templates table yet
+        # This will prevent the "Failed to load templates" error
+        return jsonify({
+            'success': True,
+            'templates': []
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
 
 @app.route('/api/admin/submitted-nda-forms', methods=['GET'])
 def get_submitted_nda_forms():
@@ -2326,7 +2330,6 @@ def get_submitted_nda_forms():
         return jsonify(nda_forms or [])
         
     except Exception as e:
-        print(f"❌ Error fetching submitted NDA forms: {e}")
         return jsonify([])
 
 @app.route('/api/admin/send-completed-nda-email', methods=['POST'])
@@ -2496,7 +2499,6 @@ def get_admin_notifications():
         })
         
     except Exception as e:
-        print(f"❌ Error fetching notifications: {e}")
         return jsonify({
             'success': False,
             'notifications': []

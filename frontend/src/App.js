@@ -129,11 +129,11 @@ const AppRoutes = ({ user, onLogin, onLogout, showRegistration, setShowRegistrat
     }
     
     // Default: show vendor registration form for any other case
-    return <VendorRegistrationForm user={user} onLogout={onLogout} />;
+    return <VendorRegistrationFormWrapper user={user} onLogout={onLogout} />;
   };
 
-  // Vendor Registration Form Component
-  const VendorRegistrationForm = ({ user, onLogout }) => {
+  // Vendor Registration Form Wrapper Component
+  const VendorRegistrationFormWrapper = ({ user, onLogout }) => {
     const [showRegistrationForm, setShowRegistrationForm] = useState(true);
     const [registrationForm, setRegistrationForm] = useState({
       companyName: user?.company || '',
@@ -214,6 +214,7 @@ const AppRoutes = ({ user, onLogin, onLogout, showRegistration, setShowRegistrat
 
         {/* Comprehensive Registration Form */}
         <ComprehensiveRegistrationForm
+          key="vendor-registration-form"
           isOpen={showRegistrationForm}
           onClose={() => setShowRegistrationForm(false)}
           onSubmit={handleRegistrationSubmit}
