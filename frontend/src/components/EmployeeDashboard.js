@@ -43,6 +43,10 @@ const EmployeeDashboard = ({ user, onLogout }) => {
     priority: 'medium'
   });
   
+  // Calendar navigation state
+  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
+  const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
+  
   // Enhanced state for comprehensive dashboard
   const [stats, setStats] = useState({
     totalTasks: 0,
@@ -86,27 +90,102 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   ];
 
   useEffect(() => {
+    if (user && user.id) {
     loadData();
-  }, []);
+    }
+  }, [user?.id]);
+
+  // Real-time total hours calculation while clocked in
+  useEffect(() => {
+    let interval;
+    
+    if (attendanceStatus.clocked_in && !attendanceStatus.clocked_out) {
+      // Update total hours every minute while clocked in
+      interval = setInterval(() => {
+        if (attendanceStatus.clock_in_time) {
+          // Parse the clock-in time (format: "HH:MM")
+          const [hours, minutes] = attendanceStatus.clock_in_time.split(':').map(Number);
+          const clockInDateTime = new Date();
+          clockInDateTime.setHours(hours, minutes, 0, 0);
+          
+          const currentTime = new Date();
+          const timeDiffMs = currentTime - clockInDateTime;
+          let hoursWorked = timeDiffMs / (1000 * 60 * 60); // Convert to hours
+          
+          // Ensure reasonable hours (not more than 24 hours in a day)
+          hoursWorked = Math.max(0, Math.min(hoursWorked, 24));
+          
+          setAttendanceStatus(prev => ({
+            ...prev,
+            total_hours: parseFloat(hoursWorked.toFixed(2))
+          }));
+        }
+      }, 60000); // Update every minute
+    }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [attendanceStatus.clocked_in, attendanceStatus.clocked_out, attendanceStatus.clock_in_time]);
+
+  // Listen for real-time database changes
+  useEffect(() => {
+    const handleDatabaseChange = (event) => {
+      const change = event.detail;
+      console.log('EmployeeDashboard received database change:', change);
+      
+      // Reload data when there are changes to tickets, tasks, or projects
+      if (change.table === 'tickets' || change.table === 'tasks' || change.table === 'projects') {
+        console.log('🔄 Refreshing employee data due to database change:', change.table);
+        loadData();
+      }
+    };
+
+    // Add event listener for database changes
+    window.addEventListener('databaseChange', handleDatabaseChange);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('databaseChange', handleDatabaseChange);
+    };
+  }, [user?.id]);
 
   const loadData = async () => {
     try {
       setLoading(true);
-      console.log('Loading data for employee ID:', user.id);
+      console.log('🔄 Loading employee data for ID:', user.id);
       
-      const [notificationsData, announcementsData, tasksData, projectsData, ticketsData] = await Promise.all([
-        apiCall(`/api/employee/notifications?employee_id=${user.id}`),
-        apiCall(`/api/employee/announcements?employee_id=${user.id}`),
-        apiCall(`/api/admin/tasks`).then(tasks => tasks.filter(task => task.assigned_to_id == user.id)),
-        apiCall(`/api/admin/projects`).then(projects => projects.filter(project => project.assigned_to_id == user.id)),
-        apiCall(`/api/admin/tickets`).then(tickets => tickets.filter(ticket => ticket.assigned_to_id == user.id))
+      const [notificationsData, announcementsData, allTasks, allProjects, allTickets] = await Promise.all([
+        apiCall(`/api/employee/notifications?employee_id=${user.id}`).catch(err => {
+          console.log('⚠️ Employee notifications API not available, using empty array');
+          return { success: true, notifications: [] };
+        }),
+        apiCall(`/api/employee/announcements?employee_id=${user.id}`).catch(err => {
+          console.log('⚠️ Employee announcements API not available, using empty array');
+          return { success: true, announcements: [] };
+        }),
+        apiCall(`/api/admin/tasks`),
+        apiCall(`/api/admin/projects`),
+        apiCall(`/api/admin/tickets`)
       ]);
       
-      console.log('Raw tickets data:', ticketsData);
-      console.log('Filtered tickets for employee:', ticketsData.filter(ticket => ticket.assigned_to_id == user.id));
+      // Filter data after getting all results
+      const tasksData = allTasks.filter(task => task.assigned_to_id == user.id);
+      const projectsData = allProjects.filter(project => project.assigned_to_id == user.id);
+      const ticketsData = allTickets.filter(ticket => {
+        const matchesAssigned = ticket.assigned_to_id == user.id;
+        const matchesCreatedById = ticket.created_by == user.id;
+        const matchesCreatedByName = ticket.created_by && typeof ticket.created_by === 'string' && ticket.created_by.includes(user.name);
+        return matchesAssigned || matchesCreatedById || matchesCreatedByName;
+      });
       
-      setNotifications(notificationsData);
-      setAnnouncements(announcementsData);
+      console.log('📊 Employee data loaded successfully:');
+      console.log('✅ Tasks:', tasksData.length, 'Projects:', projectsData.length, 'Tickets:', ticketsData.length);
+      
+      setNotifications(Array.isArray(notificationsData) ? notificationsData : notificationsData.notifications || []);
+      setAnnouncements(Array.isArray(announcementsData) ? announcementsData : announcementsData.announcements || []);
       setTasks(tasksData);
       setProjects(projectsData);
       setTickets(ticketsData);
@@ -124,7 +203,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
         activeProjects: projectsData.filter(project => project.status === 'active' || project.status === 'in_progress').length,
         totalTickets: ticketsData.length,
         openTickets: ticketsData.filter(ticket => ticket.status === 'open' || ticket.status === 'in_progress').length,
-        unreadNotifications: notificationsData.filter(notification => !notification.read).length
+        unreadNotifications: (Array.isArray(notificationsData) ? notificationsData : notificationsData.notifications || []).filter(notification => !notification.read).length
       };
       setStats(calculatedStats);
       
@@ -247,7 +326,15 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       
       if (response.success) {
         showNotification(response.message, 'success');
-        await loadAttendanceStatus(); // Reload status
+        // Immediately update the attendance status to show clock-out option
+        setAttendanceStatus(prev => ({
+          ...prev,
+          clocked_in: true,
+          clocked_out: false,
+          clock_in_time: response.clock_in_time || new Date().toLocaleTimeString(),
+          status: 'Present'
+        }));
+        await loadAttendanceStatus(); // Reload status from server
       }
     } catch (error) {
       console.error('Error clocking in:', error);
@@ -264,7 +351,16 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       
       if (response.success) {
         showNotification(response.message, 'success');
-        await loadAttendanceStatus(); // Reload status
+        // Immediately update the attendance status - allow clock in again
+        setAttendanceStatus(prev => ({
+          ...prev,
+          clocked_in: false,
+          clocked_out: true,
+          clock_out_time: response.clock_out_time || new Date().toLocaleTimeString(),
+          total_hours: response.total_hours || prev.total_hours,
+          status: response.status || prev.status
+        }));
+        await loadAttendanceStatus(); // Reload status from server
       }
     } catch (error) {
       console.error('Error clocking out:', error);
@@ -344,6 +440,41 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       console.error('Error creating ticket:', error);
       alert('Failed to create ticket. Please try again.');
     }
+  };
+
+  // Month navigation functions
+  const navigateMonth = (direction) => {
+    if (direction === 'prev') {
+      if (currentMonth === 0) {
+        setCurrentMonth(11);
+        setCurrentYear(currentYear - 1);
+      } else {
+        setCurrentMonth(currentMonth - 1);
+      }
+    } else if (direction === 'next') {
+      if (currentMonth === 11) {
+        setCurrentMonth(0);
+        setCurrentYear(currentYear + 1);
+      } else {
+        setCurrentMonth(currentMonth + 1);
+      }
+    }
+  };
+
+  const getMonthName = (monthIndex) => {
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return months[monthIndex];
+  };
+
+  const getDaysInMonth = (month, year) => {
+    return new Date(year, month + 1, 0).getDate();
+  };
+
+  const getFirstDayOfMonth = (month, year) => {
+    return new Date(year, month, 1).getDay();
   };
 
   const getPriorityColor = (priority) => {
@@ -709,7 +840,14 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                   <div className="p-6 border-b">
                     <div className="flex items-center justify-between">
                       <h3 className="text-lg font-semibold">Recent Activity</h3>
-                      <TrendingUp className="h-5 w-5 text-gray-400" />
+                      <button 
+                        onClick={() => loadData()}
+                        className="flex items-center gap-2 text-gray-500 hover:text-gray-700 transition-colors"
+                        title="Refresh Recent Activity"
+                      >
+                        <TrendingUp className="h-5 w-5" />
+                        <span className="text-xs">Refresh</span>
+                      </button>
                     </div>
                   </div>
                   <div className="p-6">
@@ -718,26 +856,28 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                     ) : (
                       <div className="space-y-4">
                         {recentActivity.map((activity) => (
-                          <div key={`${activity.type}-${activity.id}`} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                            <div className="flex items-center gap-3">
-                              {activity.type === 'task' && <CheckSquare className="h-5 w-5 text-blue-500" />}
-                              {activity.type === 'project' && <Briefcase className="h-5 w-5 text-green-500" />}
-                              {activity.type === 'ticket' && <Ticket className="h-5 w-5 text-purple-500" />}
-                              <div>
-                                <p className="font-medium">{activity.title}</p>
-                                <div className="flex items-center gap-2">
-                                  <span className={`text-xs px-2 py-1 rounded-full ${getStatusColor(activity.status)}`}>
+                          <div key={`${activity.type}-${activity.id}`} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              {activity.type === 'task' && <CheckSquare className="h-5 w-5 text-blue-500 flex-shrink-0" />}
+                              {activity.type === 'project' && <Briefcase className="h-5 w-5 text-green-500 flex-shrink-0" />}
+                              {activity.type === 'ticket' && <Ticket className="h-5 w-5 text-purple-500 flex-shrink-0" />}
+                              <div className="min-w-0 flex-1">
+                                <p className="font-medium text-gray-900 truncate">{activity.title}</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${getStatusColor(activity.status)}`}>
                                     {activity.status}
                                   </span>
-                                  <span className={`text-xs px-2 py-1 rounded-full ${getPriorityColor(activity.priority)}`}>
+                                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${getPriorityColor(activity.priority)}`}>
                                     {activity.priority}
                                   </span>
                                 </div>
                               </div>
                             </div>
-                            <span className="text-xs text-gray-500">
+                            <div className="flex-shrink-0 ml-3">
+                              <span className="text-xs text-gray-500 whitespace-nowrap">
                               {new Date(activity.updated_at).toLocaleDateString()}
                             </span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -1158,14 +1298,14 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                 <div className="flex justify-center gap-4">
                   <button
                     onClick={handleClockIn}
-                    disabled={attendanceStatus.clocked_in}
+                    disabled={attendanceStatus.clocked_in && !attendanceStatus.clocked_out}
                     className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
-                      attendanceStatus.clocked_in
+                      attendanceStatus.clocked_in && !attendanceStatus.clocked_out
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-green-500 text-white hover:bg-green-600'
                     }`}
                   >
-                    {attendanceStatus.clocked_in ? 'Already Clocked In' : 'Clock In'}
+                    {attendanceStatus.clocked_in && !attendanceStatus.clocked_out ? 'Already Clocked In' : 'Clock In'}
                   </button>
                   <button
                     onClick={handleClockOut}
@@ -1175,8 +1315,9 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                         ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                         : 'bg-red-500 text-white hover:bg-red-600'
                     }`}
+                    title={!attendanceStatus.clocked_in ? 'You must clock in first' : attendanceStatus.clocked_out ? 'Already clocked out - clock in again to continue' : 'Click to clock out'}
                   >
-                    {attendanceStatus.clocked_out ? 'Already Clocked Out' : 'Clock Out'}
+                    {attendanceStatus.clocked_out ? 'Clock In Again' : 'Clock Out'}
                   </button>
                 </div>
 
@@ -1218,35 +1359,59 @@ const EmployeeDashboard = ({ user, onLogout }) => {
             </div>
 
             {/* Attendance Calendar */}
-            <div className="bg-white rounded-xl shadow-sm border p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold">October 2025</h3>
+            <div className="bg-white rounded-xl shadow-sm border p-8">
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-lg font-semibold">{getMonthName(currentMonth)} {currentYear}</h3>
                 <div className="flex items-center gap-2">
-                  <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+                  <button 
+                    onClick={() => navigateMonth('prev')}
+                    className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Previous month"
+                  >
                     <ArrowRight className="h-4 w-4 rotate-180" />
                   </button>
-                  <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+                  <button 
+                    onClick={() => navigateMonth('next')}
+                    className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="Next month"
+                  >
                     <ArrowRight className="h-4 w-4" />
-                    </button>
-                  </div>
+                  </button>
+                </div>
               </div>
               
               {/* Calendar Grid */}
-              <div className="grid grid-cols-7 gap-2 mb-4">
+              <div className="grid grid-cols-7 gap-4 mb-6">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                  <div key={day} className="text-center text-sm font-medium text-gray-500 py-2">
+                  <div key={day} className="text-center text-lg font-medium text-gray-500 py-4">
                     {day}
                 </div>
               ))}
                 </div>
               
-              <div className="grid grid-cols-7 gap-2">
-                {/* Calendar dates would go here */}
-                {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
-                  <div key={day} className="aspect-square flex items-center justify-center text-sm border rounded-lg hover:bg-gray-50 cursor-pointer">
-                    {day}
-                  </div>
+              <div className="grid grid-cols-7 gap-4">
+                {/* Empty cells for days before the first day of the month */}
+                {Array.from({ length: getFirstDayOfMonth(currentMonth, currentYear) }, (_, i) => (
+                  <div key={`empty-${i}`} className="h-16"></div>
                 ))}
+                
+                {/* Calendar dates for the current month */}
+                {Array.from({ length: getDaysInMonth(currentMonth, currentYear) }, (_, i) => {
+                  const day = i + 1;
+                  const isToday = new Date().getDate() === day && 
+                                 new Date().getMonth() === currentMonth && 
+                                 new Date().getFullYear() === currentYear;
+                  return (
+                    <div 
+                      key={day} 
+                      className={`h-16 flex items-center justify-center text-lg border rounded-xl hover:bg-gray-50 cursor-pointer transition-colors ${
+                        isToday ? 'bg-blue-100 border-blue-300 text-blue-700 font-semibold' : ''
+                      }`}
+                    >
+                      {day}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1739,6 +1904,35 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                 <div>
                   <h4 className="font-medium text-gray-900">Profile Picture</h4>
                   <p className="text-sm text-gray-500">Click to upload a new photo</p>
+                  {profilePicture && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const response = await fetch('/api/employee/remove-profile-picture', {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {
+                              'Content-Type': 'application/json',
+                            },
+                          });
+                          
+                          if (response.ok) {
+                            setProfilePicture(null);
+                            alert('Profile picture removed successfully');
+                          } else {
+                            alert('Failed to remove profile picture');
+                          }
+                        } catch (error) {
+                          console.error('Error removing profile picture:', error);
+                          alert('Error removing profile picture');
+                        }
+                      }}
+                      className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
+                    >
+                      Remove Profile Picture
+                    </button>
+                  )}
                 </div>
               </div>
 

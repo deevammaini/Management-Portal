@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import LoginScreen from './components/LoginScreen';
 import RegistrationScreen from './components/RegistrationScreen';
@@ -9,6 +9,7 @@ import VendorPortalFullAccess from './components/VendorPortalFullAccess';
 import ComprehensiveRegistrationForm from './components/ComprehensiveRegistrationForm';
 import VendorRegistrationPage from './components/VendorRegistrationPage';
 import { apiCall } from './utils/api';
+import { SocketProvider } from './contexts/SocketContext';
 
 const App = () => {
   const [user, setUser] = useState(null);
@@ -63,15 +64,17 @@ const App = () => {
   }
 
   return (
-    <Router>
-      <AppRoutes 
-        user={user} 
-        onLogin={handleLogin} 
-        onLogout={handleLogout}
-        showRegistration={showRegistration}
-        setShowRegistration={setShowRegistration}
-      />
-    </Router>
+    <SocketProvider>
+      <Router>
+        <AppRoutes 
+          user={user} 
+          onLogin={handleLogin} 
+          onLogout={handleLogout}
+          showRegistration={showRegistration}
+          setShowRegistration={setShowRegistration}
+        />
+      </Router>
+    </SocketProvider>
   );
 };
 
@@ -134,19 +137,14 @@ const AppRoutes = ({ user, onLogin, onLogout, showRegistration, setShowRegistrat
 
   // Vendor Registration Form Wrapper Component
   const VendorRegistrationFormWrapper = ({ user, onLogout }) => {
+    console.log('VendorRegistrationFormWrapper rendered');
     const [showRegistrationForm, setShowRegistrationForm] = useState(true);
-    const [registrationForm, setRegistrationForm] = useState({
-      companyName: user?.company || '',
-      contactPersonName: user?.contact_person || '',
-      emailAddress: user?.email || '',
-      // Add other default fields as needed
-    });
 
-    const handleRegistrationSubmit = async () => {
+    const handleRegistrationSubmit = async (formData) => {
       try {
         const response = await apiCall('/api/vendor/register', {
           method: 'POST',
-          body: JSON.stringify(registrationForm)
+          body: JSON.stringify(formData)
         });
         
         if (response.success) {
@@ -159,12 +157,6 @@ const AppRoutes = ({ user, onLogin, onLogout, showRegistration, setShowRegistrat
       }
     };
 
-    const handleInputChange = (field, value) => {
-      setRegistrationForm(prev => ({
-        ...prev,
-        [field]: value
-      }));
-    };
 
     return (
       <div className="min-h-screen bg-gray-50">
@@ -214,12 +206,9 @@ const AppRoutes = ({ user, onLogin, onLogout, showRegistration, setShowRegistrat
 
         {/* Comprehensive Registration Form */}
         <ComprehensiveRegistrationForm
-          key="vendor-registration-form"
           isOpen={showRegistrationForm}
           onClose={() => setShowRegistrationForm(false)}
           onSubmit={handleRegistrationSubmit}
-          formData={registrationForm}
-          onInputChange={handleInputChange}
         />
       </div>
     );

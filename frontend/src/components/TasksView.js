@@ -34,6 +34,28 @@ const TasksView = ({ showNotification }) => {
     loadData();
   }, []);
 
+  // Listen for real-time database changes
+  useEffect(() => {
+    const handleDatabaseChange = (event) => {
+      const change = event.detail;
+      console.log('TasksView received database change:', change);
+      
+      // Reload data when there are changes to tasks
+      if (change.table === 'tasks') {
+        console.log('🔄 Refreshing tasks data due to database change');
+        loadData();
+      }
+    };
+
+    // Add event listener for database changes
+    window.addEventListener('databaseChange', handleDatabaseChange);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('databaseChange', handleDatabaseChange);
+    };
+  }, []);
+
   const handleSalaryCodeChange = (salaryCode) => {
     if (salaryCode && employees.length > 0) {
       const employee = employees.find(emp => emp.employeeId === salaryCode);
@@ -71,6 +93,9 @@ const TasksView = ({ showNotification }) => {
         apiCall('/api/admin/vendors'),
         apiCall('/api/admin/task-updates')
       ]);
+      
+      console.log('📊 TasksView loaded tasks:', tasksData);
+      console.log('📊 Task statuses:', tasksData.map(t => ({ id: t.id, title: t.title, status: t.status })));
       
       setTasks(tasksData);
       setEmployees(employeesData);
@@ -184,7 +209,7 @@ const TasksView = ({ showNotification }) => {
   const filteredTasks = (tasks || []).filter(task => {
     const matchesSearch = task.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (task.description && task.description.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || task.status?.toLowerCase() === statusFilter.toLowerCase();
     const matchesPriority = priorityFilter === 'all' || task.priority === priorityFilter;
     const matchesAssigned = assignedToFilter === 'all' || 
                           (assignedToFilter === 'assigned' && task.assigned_to_id) ||
@@ -288,7 +313,7 @@ const TasksView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Pending</p>
-              <p className="text-2xl font-bold text-gray-900">{(tasks || []).filter(t => t.status === 'pending').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(tasks || []).filter(t => t.status?.toLowerCase() === 'pending').length}</p>
             </div>
             <Clock className="h-8 w-8 text-yellow-500" />
           </div>
@@ -298,7 +323,7 @@ const TasksView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">In Progress</p>
-              <p className="text-2xl font-bold text-gray-900">{(tasks || []).filter(t => t.status === 'in_progress').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(tasks || []).filter(t => t.status?.toLowerCase() === 'in_progress').length}</p>
             </div>
             <ArrowRight className="h-8 w-8 text-blue-500" />
           </div>
@@ -308,7 +333,7 @@ const TasksView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Completed</p>
-              <p className="text-2xl font-bold text-gray-900">{(tasks || []).filter(t => t.status === 'completed').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(tasks || []).filter(t => t.status?.toLowerCase() === 'completed').length}</p>
             </div>
             <CheckSquare className="h-8 w-8 text-green-500" />
           </div>

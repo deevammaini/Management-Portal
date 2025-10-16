@@ -35,6 +35,28 @@ const TicketsView = ({ showNotification }) => {
     loadData();
   }, []);
 
+  // Listen for real-time database changes
+  useEffect(() => {
+    const handleDatabaseChange = (event) => {
+      const change = event.detail;
+      console.log('TicketsView received database change:', change);
+      
+      // Reload data when there are changes to tickets
+      if (change.table === 'tickets') {
+        console.log('🔄 Refreshing tickets data due to database change');
+        loadData();
+      }
+    };
+
+    // Add event listener for database changes
+    window.addEventListener('databaseChange', handleDatabaseChange);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('databaseChange', handleDatabaseChange);
+    };
+  }, []);
+
   const handleSalaryCodeChange = (salaryCode) => {
     if (salaryCode && employees.length > 0) {
       const employee = employees.find(emp => emp.employeeId === salaryCode);
@@ -66,19 +88,28 @@ const TicketsView = ({ showNotification }) => {
   const loadData = async () => {
     try {
       setLoading(true);
+      console.log('🔄 Loading tickets data...');
+      
       const [ticketsData, employeesData, vendorsData, updatesData] = await Promise.all([
         apiCall('/api/admin/tickets'),
         apiCall('/api/admin/employees'),
         apiCall('/api/admin/vendors'),
-        apiCall('/api/admin/ticket-updates')
+        apiCall('/api/admin/ticket-updates').catch(err => {
+          console.log('⚠️ Ticket updates API not available, using empty array');
+          return [];
+        })
       ]);
+      
+      console.log('🎫 Tickets data received:', ticketsData);
+      console.log('👥 Employees data received:', employeesData);
+      console.log('🏢 Vendors data received:', vendorsData);
       
       setTickets(ticketsData);
       setEmployees(employeesData);
       setVendors(vendorsData);
       setTicketUpdates(updatesData || []);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('❌ Error loading data:', error);
       showNotification('Failed to load data', 'error');
     } finally {
       setLoading(false);
@@ -205,7 +236,7 @@ const TicketsView = ({ showNotification }) => {
   const filteredTickets = (tickets || []).filter(ticket => {
     const matchesSearch = ticket.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (ticket.description && ticket.description.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesStatus = statusFilter === 'all' || ticket.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || ticket.status?.toLowerCase() === statusFilter.toLowerCase();
     const matchesPriority = priorityFilter === 'all' || ticket.priority === priorityFilter;
     const matchesCategory = categoryFilter === 'all' || ticket.category === categoryFilter;
     const matchesAssigned = assignedToFilter === 'all' || 
@@ -309,7 +340,7 @@ const TicketsView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Open</p>
-              <p className="text-2xl font-bold text-gray-900">{(tickets || []).filter(t => t.status === 'open' || t.status === 'Open').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(tickets || []).filter(t => t.status?.toLowerCase() === 'open').length}</p>
             </div>
             <AlertCircle className="h-8 w-8 text-yellow-500" />
           </div>
@@ -319,7 +350,7 @@ const TicketsView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">In Progress</p>
-              <p className="text-2xl font-bold text-gray-900">{(tickets || []).filter(t => t.status === 'in_progress' || t.status === 'In Progress').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(tickets || []).filter(t => t.status?.toLowerCase() === 'in_progress').length}</p>
             </div>
             <ArrowRight className="h-8 w-8 text-blue-500" />
           </div>
@@ -329,7 +360,7 @@ const TicketsView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Resolved</p>
-              <p className="text-2xl font-bold text-gray-900">{(tickets || []).filter(t => t.status === 'resolved' || t.status === 'Resolved').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(tickets || []).filter(t => t.status?.toLowerCase() === 'resolved' || t.status?.toLowerCase() === 'closed').length}</p>
             </div>
             <Ticket className="h-8 w-8 text-green-500" />
           </div>

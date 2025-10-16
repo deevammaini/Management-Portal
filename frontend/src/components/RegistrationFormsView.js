@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, CheckCircle, XCircle, Eye, Download, Calendar, Building, User, Phone, Mail, MapPin, FileText } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import { useSocket } from '../contexts/SocketContext';
 
 const RegistrationFormsView = ({ showNotification }) => {
   const [registrations, setRegistrations] = useState([]);
@@ -9,10 +10,56 @@ const RegistrationFormsView = ({ showNotification }) => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedRegistration, setSelectedRegistration] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const { isConnected } = useSocket();
 
   useEffect(() => {
     loadRegistrations();
   }, []);
+
+  // Listen for real-time database changes
+  useEffect(() => {
+    const handleDatabaseChange = (event) => {
+      const change = event.detail;
+      console.log('🔔 RegistrationFormsView received database change:', change);
+      
+      if (change.table === 'vendor_registrations') {
+        // Update specific registration in state instead of reloading all data
+        if (change.action === 'update') {
+          console.log('📝 Updating registration:', change.data);
+          setRegistrations(prevRegistrations => 
+            prevRegistrations.map(reg => 
+              reg.id === change.data.id 
+                ? { ...reg, status: change.data.status }
+                : reg
+            )
+          );
+          
+          // Show notification for status changes
+          if (change.data.status === 'approved') {
+            showNotification(`${change.data.company_name} registration approved`, 'success');
+          } else if (change.data.status === 'rejected') {
+            showNotification(`${change.data.company_name} registration rejected`, 'warning');
+          } else if (change.data.status === 'pending') {
+            showNotification(`${change.data.company_name} registration status changed to pending`, 'info');
+          }
+        } else if (change.action === 'insert') {
+          // For new registrations, reload to get the complete data
+          loadRegistrations();
+          showNotification(`New registration from ${change.data.company_name}`, 'info');
+        }
+      }
+    };
+
+    // Add event listener for database changes
+    window.addEventListener('databaseChange', handleDatabaseChange);
+    console.log('🎧 RegistrationFormsView: Added database change listener');
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('databaseChange', handleDatabaseChange);
+      console.log('🎧 RegistrationFormsView: Removed database change listener');
+    };
+  }, [showNotification]);
 
   const loadRegistrations = async () => {
     try {
@@ -20,6 +67,7 @@ const RegistrationFormsView = ({ showNotification }) => {
       const response = await apiCall('/api/admin/vendor-registrations');
       setRegistrations(response.registrations || []);
     } catch (error) {
+      console.error('Error loading registrations:', error);
       showNotification('Failed to load registration forms', 'error');
     } finally {
       setLoading(false);
@@ -71,7 +119,8 @@ const RegistrationFormsView = ({ showNotification }) => {
       registration.contact_person?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       registration.email?.toLowerCase().includes(searchTerm.toLowerCase());
     
-    const matchesStatus = statusFilter === 'all' || registration.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || 
+      registration.status?.toLowerCase() === statusFilter.toLowerCase();
     
     return matchesSearch && matchesStatus;
   });
@@ -80,10 +129,14 @@ const RegistrationFormsView = ({ showNotification }) => {
     const statusConfig = {
       pending: { color: 'bg-yellow-100 text-yellow-800', label: 'Pending' },
       approved: { color: 'bg-green-100 text-green-800', label: 'Approved' },
-      declined: { color: 'bg-red-100 text-red-800', label: 'Declined' }
+      declined: { color: 'bg-red-100 text-red-800', label: 'Declined' },
+      rejected: { color: 'bg-red-100 text-red-800', label: 'Rejected' }
     };
     
-    const config = statusConfig[status] || statusConfig.pending;
+    // Normalize status to lowercase for comparison
+    const normalizedStatus = status?.toLowerCase() || 'pending';
+    const config = statusConfig[normalizedStatus] || statusConfig.pending;
+    
     return (
       <span className={`px-2 py-1 rounded-full text-xs font-medium ${config.color}`}>
         {config.label}
@@ -114,15 +167,61 @@ const RegistrationFormsView = ({ showNotification }) => {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Registration Forms</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-2xl font-bold text-gray-900">Registration Forms</h2>
+            <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
+              isConnected 
+                ? 'bg-green-100 text-green-700' 
+                : 'bg-red-100 text-red-700'
+            }`}>
+              <div className={`w-2 h-2 rounded-full ${
+                isConnected ? 'bg-green-500' : 'bg-red-500'
+              }`}></div>
+              {isConnected ? 'Live Updates' : 'Offline'}
+            </div>
+          </div>
           <p className="text-gray-600">Manage vendor registration applications</p>
         </div>
         <div className="flex items-center gap-4">
           <button
             onClick={loadRegistrations}
-            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+            className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors flex items-center gap-2"
           >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+            </svg>
             Refresh
+          </button>
+          <div className={`px-3 py-1 rounded-full text-xs font-medium ${
+            isConnected 
+              ? 'bg-green-100 text-green-700' 
+              : 'bg-red-100 text-red-700'
+          }`}>
+            {isConnected ? '🟢 Live Updates Active' : '🔴 Offline - Click Refresh'}
+          </div>
+          <button
+            onClick={async () => {
+              try {
+                const response = await fetch('http://localhost:8000/api/admin/broadcast-change', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    table: 'vendor_registrations',
+                    action: 'update',
+                    data: { id: 5, status: 'pending', company_name: 'Test INC' }
+                  })
+                });
+                const result = await response.json();
+                console.log('Manual broadcast result:', result);
+                showNotification('Test broadcast sent! Check console for details.', 'info');
+              } catch (error) {
+                console.error('Manual broadcast error:', error);
+                showNotification('Manual broadcast failed!', 'error');
+              }
+            }}
+            className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-xs"
+          >
+            Test Broadcast
           </button>
         </div>
       </div>
@@ -167,7 +266,7 @@ const RegistrationFormsView = ({ showNotification }) => {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Pending</p>
               <p className="text-2xl font-bold text-gray-900">
-                {registrations.filter(r => r.status === 'pending').length}
+                {registrations.filter(r => r.status?.toLowerCase() === 'pending').length}
               </p>
             </div>
           </div>
@@ -180,7 +279,7 @@ const RegistrationFormsView = ({ showNotification }) => {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Approved</p>
               <p className="text-2xl font-bold text-gray-900">
-                {registrations.filter(r => r.status === 'approved').length}
+                {registrations.filter(r => r.status?.toLowerCase() === 'approved').length}
               </p>
             </div>
           </div>
@@ -193,7 +292,7 @@ const RegistrationFormsView = ({ showNotification }) => {
             <div className="ml-4">
               <p className="text-sm font-medium text-gray-600">Declined</p>
               <p className="text-2xl font-bold text-gray-900">
-                {registrations.filter(r => r.status === 'declined').length}
+                {registrations.filter(r => r.status?.toLowerCase() === 'declined' || r.status?.toLowerCase() === 'rejected').length}
               </p>
             </div>
           </div>
@@ -274,23 +373,24 @@ const RegistrationFormsView = ({ showNotification }) => {
                       >
                         <Eye size={16} />
                       </button>
-                      {registration.status === 'pending' && (
-                        <>
+                      {/* Show buttons only for pending registrations */}
+                      {registration.status?.toLowerCase() === 'pending' && (
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={() => handleApprove(registration.id)}
-                            className="text-green-600 hover:text-green-900 p-1"
-                            title="Approve"
+                            className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg border-2 border-green-500 transition-all duration-200 hover:scale-105"
+                            title="Approve Registration"
                           >
-                            <CheckCircle size={16} />
+                            ✓ APPROVE
                           </button>
                           <button
                             onClick={() => handleDecline(registration.id)}
-                            className="text-red-600 hover:text-red-900 p-1"
-                            title="Decline"
+                            className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg border-2 border-red-500 transition-all duration-200 hover:scale-105"
+                            title="Decline Registration"
                           >
-                            <XCircle size={16} />
+                            ✗ DECLINE
                           </button>
-                        </>
+                        </div>
                       )}
                     </div>
                   </td>
@@ -408,7 +508,7 @@ const RegistrationFormsView = ({ showNotification }) => {
                     <p className="text-sm font-medium text-gray-600">Status</p>
                     {getStatusBadge(selectedRegistration.status)}
                   </div>
-                  {selectedRegistration.status === 'pending' && (
+                  {selectedRegistration.status?.toLowerCase() === 'pending' && (
                     <div className="flex space-x-3">
                       <button
                         onClick={() => {

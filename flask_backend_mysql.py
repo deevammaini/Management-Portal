@@ -3,6 +3,7 @@
 
 from flask import Flask, jsonify, request, send_file, session, send_from_directory, redirect, make_response
 from flask_cors import CORS
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import os
 from datetime import datetime, timedelta
 import mysql.connector
@@ -55,6 +56,19 @@ app = Flask(__name__)
 CORS(app, 
      supports_credentials=True,
      origins=[
+         "http://localhost:3000",
+         "http://localhost:3001",
+         "http://localhost:8000",
+         "http://127.0.0.1:3000",
+         "http://127.0.0.1:3001",
+         "http://127.0.0.1:8000",
+         "http://192.168.1.1:3000",
+         "http://192.168.1.1:3001",
+         "http://192.168.1.1:8000"
+     ])
+
+# Initialize SocketIO for real-time updates
+socketio = SocketIO(app, cors_allowed_origins=[
          "http://localhost:3000",
          "http://localhost:3001",
          "http://localhost:8000",
@@ -1028,10 +1042,11 @@ def clock_in():
         data = request.get_json()
         employee_id = data.get('employee_id')
         
+        
         if not employee_id:
             return jsonify({'error': 'Employee ID is required'}), 400
         
-        user_query = "SELECT id FROM users WHERE employee_id = %s AND user_type = 'employee'"
+        user_query = "SELECT id FROM users WHERE id = %s AND user_type = 'employee'"
         user = execute_query(user_query, (employee_id,), fetch_one=True)
         
         if not user:
@@ -1043,10 +1058,11 @@ def clock_in():
         current_date = current_time.date()
         current_time_only = current_time.time()
         
-        check_query = "SELECT id, clock_in_time FROM attendance WHERE employee_id = %s AND date = %s"
-        existing = execute_query(check_query, (user['id'], current_date), fetch_one=True)
+        check_query = "SELECT id, clock_in_time, clock_out_time FROM attendance WHERE employee_id = %s AND date = %s"
+        existing = execute_query(check_query, (employee_id, current_date), fetch_one=True)
         
-        if existing and existing['clock_in_time']:
+        # Allow clock-in if no existing record OR if already clocked out
+        if existing and existing['clock_in_time'] and not existing['clock_out_time']:
             return jsonify({'error': 'Already clocked in today'}), 400
         
         late_threshold = time(10, 0)
@@ -1063,9 +1079,10 @@ def clock_in():
             late_minutes = int((current_time_only.hour - 9) * 60 + current_time_only.minute - 30)
         
         if existing:
+            # If clocked out, reset clock_out_time to null and update clock_in_time
             update_query = """
             UPDATE attendance 
-            SET clock_in_time = %s, status = %s, late_minutes = %s, updated_at = NOW()
+            SET clock_in_time = %s, clock_out_time = NULL, status = %s, late_minutes = %s, total_hours = 0, updated_at = NOW()
             WHERE id = %s
             """
             execute_query(update_query, (current_time_only, status, late_minutes, existing['id']))
@@ -1076,11 +1093,22 @@ def clock_in():
             """
             execute_query(insert_query, (employee_id, current_date, current_time_only, status, late_minutes))
         
+        # Broadcast attendance change to admin
+        broadcast_database_change('attendance', 'update', {
+            'employee_id': employee_id,
+            'date': current_date.isoformat(),
+            'action': 'clock_in',
+            'clock_in_time': current_time_only.strftime('%H:%M'),
+            'status': status,
+            'late_minutes': late_minutes
+        })
+        
         return jsonify({
             'success': True, 
             'message': f'Clocked in successfully at {current_time_only.strftime("%H:%M")}',
             'status': status,
-            'late_minutes': late_minutes
+            'late_minutes': late_minutes,
+            'clock_in_time': current_time_only.strftime('%H:%M')
         })
         
     except Exception as e:
@@ -1094,10 +1122,11 @@ def clock_out():
         data = request.get_json()
         employee_id = data.get('employee_id')
         
+        
         if not employee_id:
             return jsonify({'error': 'Employee ID is required'}), 400
         
-        user_query = "SELECT id FROM users WHERE employee_id = %s AND user_type = 'employee'"
+        user_query = "SELECT id FROM users WHERE id = %s AND user_type = 'employee'"
         user = execute_query(user_query, (employee_id,), fetch_one=True)
         
         if not user:
@@ -1109,8 +1138,8 @@ def clock_out():
         current_date = current_time.date()
         current_time_only = current_time.time()
         
-        check_query = "SELECT id, clock_in_time, status FROM attendance WHERE employee_id = %s AND date = %s"
-        attendance = execute_query(check_query, (user['id'], current_date), fetch_one=True)
+        check_query = "SELECT id, clock_in_time, clock_out_time, status FROM attendance WHERE employee_id = %s AND date = %s"
+        attendance = execute_query(check_query, (employee_id, current_date), fetch_one=True)
         
         if not attendance or not attendance['clock_in_time']:
             return jsonify({'error': 'Please clock in first'}), 400
@@ -1119,8 +1148,20 @@ def clock_out():
             return jsonify({'error': 'Already clocked out today'}), 400
         
         clock_in_time = attendance['clock_in_time']
-        total_minutes = (current_time_only.hour - clock_in_time.hour) * 60 + (current_time_only.minute - clock_in_time.minute)
+        
+        # Handle different time formats
+        if hasattr(clock_in_time, 'total_seconds'):  # timedelta object
+            clock_in_hours = int(clock_in_time.total_seconds() // 3600)
+            clock_in_minutes = int((clock_in_time.total_seconds() % 3600) // 60)
+        else:  # time object
+            clock_in_hours = clock_in_time.hour
+            clock_in_minutes = clock_in_time.minute
+        
+        total_minutes = (current_time_only.hour - clock_in_hours) * 60 + (current_time_only.minute - clock_in_minutes)
         total_hours = round(total_minutes / 60, 2)
+        
+        # Ensure reasonable hours (not more than 24 hours in a day)
+        total_hours = max(0, min(total_hours, 24))
         
         update_query = """
         UPDATE attendance 
@@ -1129,15 +1170,27 @@ def clock_out():
         """
         execute_query(update_query, (current_time_only, total_hours, attendance['id']))
         
+        # Broadcast attendance change to admin
+        broadcast_database_change('attendance', 'update', {
+            'employee_id': employee_id,
+            'date': current_date.isoformat(),
+            'action': 'clock_out',
+            'clock_out_time': current_time_only.strftime('%H:%M'),
+            'total_hours': total_hours
+        })
+        
         return jsonify({
             'success': True, 
             'message': f'Clocked out successfully at {current_time_only.strftime("%H:%M")}',
-            'total_hours': total_hours
+            'total_hours': total_hours,
+            'clock_out_time': current_time_only.strftime('%H:%M')
         })
         
     except Exception as e:
         print(f"Clock out error: {e}")
-        return jsonify({'error': 'Failed to clock out'}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Failed to clock out: {str(e)}'}), 500
 
 @app.route('/api/employee/attendance/status', methods=['GET'])
 def get_attendance_status():
@@ -1148,7 +1201,7 @@ def get_attendance_status():
         if not employee_id:
             return jsonify({'error': 'Employee ID is required'}), 400
         
-        user_query = "SELECT id FROM users WHERE employee_id = %s AND user_type = 'employee'"
+        user_query = "SELECT id FROM users WHERE id = %s AND user_type = 'employee'"
         user = execute_query(user_query, (employee_id,), fetch_one=True)
         
         if not user:
@@ -1163,7 +1216,7 @@ def get_attendance_status():
         FROM attendance 
         WHERE employee_id = %s AND date = %s
         """
-        attendance = execute_query(query, (user['id'], current_date), fetch_one=True)
+        attendance = execute_query(query, (employee_id, current_date), fetch_one=True)
         
         if not attendance:
             return jsonify({
@@ -1179,14 +1232,27 @@ def get_attendance_status():
                 }
             })
         
+        # Handle time formatting for different data types
+        def format_time(time_obj):
+            if not time_obj:
+                return None
+            if hasattr(time_obj, 'total_seconds'):  # timedelta
+                hours = int(time_obj.total_seconds() // 3600)
+                minutes = int((time_obj.total_seconds() % 3600) // 60)
+                return f"{hours:02d}:{minutes:02d}"
+            elif hasattr(time_obj, 'strftime'):  # time/datetime
+                return time_obj.strftime('%H:%M')
+            else:
+                return str(time_obj)
+        
         return jsonify({
             'success': True,
             'attendance': {
                 'clocked_in': attendance['clock_in_time'] is not None,
                 'clocked_out': attendance['clock_out_time'] is not None,
                 'status': attendance['status'],
-                'clock_in_time': attendance['clock_in_time'].strftime('%H:%M') if attendance['clock_in_time'] else None,
-                'clock_out_time': attendance['clock_out_time'].strftime('%H:%M') if attendance['clock_out_time'] else None,
+                'clock_in_time': format_time(attendance['clock_in_time']),
+                'clock_out_time': format_time(attendance['clock_out_time']),
                 'total_hours': float(attendance['total_hours']) if attendance['total_hours'] else 0,
                 'late_minutes': attendance['late_minutes'] or 0
             }
@@ -1259,7 +1325,12 @@ def get_all_attendance():
     try:
         from datetime import date
         
-        current_date = date.today()
+        # Get date from query parameter, default to today
+        selected_date = request.args.get('date')
+        if selected_date:
+            current_date = date.fromisoformat(selected_date)
+        else:
+            current_date = date.today()
         
         query = """
         SELECT a.*, u.name as employee_name, u.employee_id
@@ -1270,6 +1341,19 @@ def get_all_attendance():
         """
         attendance_records = execute_query(query, (current_date,), fetch_all=True)
         
+        # Helper function to format time objects (handles both time and timedelta)
+        def format_time(time_obj):
+            if not time_obj:
+                return None
+            if hasattr(time_obj, 'total_seconds'):  # timedelta
+                hours = int(time_obj.total_seconds() // 3600)
+                minutes = int((time_obj.total_seconds() % 3600) // 60)
+                return f"{hours:02d}:{minutes:02d}"
+            elif hasattr(time_obj, 'strftime'):  # time/datetime
+                return time_obj.strftime('%H:%M')
+            else:
+                return str(time_obj)
+        
         formatted_records = []
         for record in attendance_records:
             formatted_records.append({
@@ -1278,8 +1362,8 @@ def get_all_attendance():
                 'employee_name': record['employee_name'],
                 'employee_code': record['employee_id'],
                 'date': record['date'].strftime('%Y-%m-%d'),
-                'clock_in_time': record['clock_in_time'].strftime('%H:%M') if record['clock_in_time'] else None,
-                'clock_out_time': record['clock_out_time'].strftime('%H:%M') if record['clock_out_time'] else None,
+                'clock_in_time': format_time(record['clock_in_time']),
+                'clock_out_time': format_time(record['clock_out_time']),
                 'status': record['status'],
                 'total_hours': float(record['total_hours']) if record['total_hours'] else 0,
                 'late_minutes': record['late_minutes'] or 0
@@ -1294,6 +1378,164 @@ def get_all_attendance():
         print(f"Get all attendance error: {e}")
         return jsonify({'error': 'Failed to get attendance records'}), 500
 
+@app.route('/api/admin/attendance/download', methods=['GET'])
+def download_attendance_report():
+    """Download attendance report as CSV"""
+    try:
+        from datetime import date
+        import csv
+        from io import StringIO
+        
+        # Get date from query parameter, default to today
+        selected_date = request.args.get('date')
+        if selected_date:
+            current_date = date.fromisoformat(selected_date)
+        else:
+            current_date = date.today()
+        
+        query = """
+        SELECT a.*, u.name as employee_name, u.employee_id
+        FROM attendance a
+        JOIN users u ON a.employee_id = u.id
+        WHERE a.date = %s AND u.user_type = 'employee'
+        ORDER BY u.name
+        """
+        attendance_records = execute_query(query, (current_date,), fetch_all=True)
+        
+        # Helper function to format time objects (handles both time and timedelta)
+        def format_time(time_obj):
+            if not time_obj:
+                return None
+            if hasattr(time_obj, 'total_seconds'):  # timedelta
+                hours = int(time_obj.total_seconds() // 3600)
+                minutes = int((time_obj.total_seconds() % 3600) // 60)
+                return f"{hours:02d}:{minutes:02d}"
+            elif hasattr(time_obj, 'strftime'):  # time/datetime
+                return time_obj.strftime('%H:%M')
+            else:
+                return str(time_obj)
+        
+        # Create CSV content
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write header
+        writer.writerow([
+            'Employee Name', 'Employee Code', 'Date', 'Clock In', 
+            'Clock Out', 'Status', 'Total Hours', 'Late Minutes'
+        ])
+        
+        # Write data rows
+        for record in attendance_records:
+            writer.writerow([
+                record['employee_name'],
+                record['employee_id'],
+                record['date'].strftime('%Y-%m-%d'),
+                format_time(record['clock_in_time']) or 'N/A',
+                format_time(record['clock_out_time']) or 'N/A',
+                record['status'],
+                float(record['total_hours']) if record['total_hours'] else 0,
+                record['late_minutes'] or 0
+            ])
+        
+        # Prepare response
+        csv_content = output.getvalue()
+        output.close()
+        
+        from flask import make_response
+        
+        response = make_response(csv_content)
+        response.headers['Content-Type'] = 'text/csv'
+        response.headers['Content-Disposition'] = f'attachment; filename=attendance_report_{current_date}.csv'
+        
+        return response
+        
+    except Exception as e:
+        print(f"Download attendance error: {e}")
+        return jsonify({'error': 'Failed to download attendance report'}), 500
+
+@app.route('/api/admin/attendance/monthly', methods=['GET'])
+def download_monthly_attendance_report():
+    """Download monthly attendance report as CSV"""
+    try:
+        from datetime import date
+        import csv
+        from io import StringIO
+        
+        # Get year and month from query parameters
+        year = int(request.args.get('year', date.today().year))
+        month = int(request.args.get('month', date.today().month))
+        
+        # Get all days in the month
+        from calendar import monthrange
+        days_in_month = monthrange(year, month)[1]
+        
+        # Query to get all attendance records for the month
+        query = """
+        SELECT a.*, u.name as employee_name, u.employee_id
+        FROM attendance a
+        JOIN users u ON a.employee_id = u.id
+        WHERE YEAR(a.date) = %s AND MONTH(a.date) = %s AND u.user_type = 'employee'
+        ORDER BY u.name, a.date
+        """
+        attendance_records = execute_query(query, (year, month), fetch_all=True)
+        
+        # Helper function to format time objects (handles both time and timedelta)
+        def format_time(time_obj):
+            if not time_obj:
+                return None
+            if hasattr(time_obj, 'total_seconds'):  # timedelta
+                hours = int(time_obj.total_seconds() // 3600)
+                minutes = int((time_obj.total_seconds() % 3600) // 60)
+                return f"{hours:02d}:{minutes:02d}"
+            elif hasattr(time_obj, 'strftime'):  # time/datetime
+                return time_obj.strftime('%H:%M')
+            else:
+                return str(time_obj)
+        
+        # Create CSV content
+        output = StringIO()
+        writer = csv.writer(output)
+        
+        # Write header with additional columns for monthly report
+        writer.writerow([
+            'Employee Name', 'Employee Code', 'Date', 'Clock In', 
+            'Clock Out', 'Status', 'Total Hours', 'Late Minutes', 'Week Day'
+        ])
+        
+        # Write data rows
+        for record in attendance_records:
+            date_obj = record['date']
+            week_day = date_obj.strftime('%A')  # Full weekday name
+            writer.writerow([
+                record['employee_name'],
+                record['employee_id'],
+                record['date'].strftime('%Y-%m-%d'),
+                format_time(record['clock_in_time']) or 'N/A',
+                format_time(record['clock_out_time']) or 'N/A',
+                record['status'],
+                float(record['total_hours']) if record['total_hours'] else 0,
+                record['late_minutes'] or 0,
+                week_day
+            ])
+        
+        # Prepare response
+        csv_content = output.getvalue()
+        output.close()
+        
+        from flask import make_response
+        
+        month_name = date(year, month, 1).strftime('%B')
+        response = make_response(csv_content)
+        response.headers['Content-Type'] = 'text/csv'
+        response.headers['Content-Disposition'] = f'attachment; filename=monthly_attendance_report_{month_name}_{year}.csv'
+        
+        return response
+        
+    except Exception as e:
+        print(f"Download monthly attendance error: {e}")
+        return jsonify({'error': 'Failed to download monthly attendance report'}), 500
+
 # Vendor Registration API endpoints
 @app.route('/api/vendor/register', methods=['POST'])
 def register_vendor_detailed():
@@ -1303,35 +1545,104 @@ def register_vendor_detailed():
         
         print(f"Received registration data: {data}")
         
-        company_name = data.get('companyName')
-        contact_person = data.get('contactPersonName') or data.get('contactPerson')
-        email = data.get('emailAddress') or data.get('email')
-        phone = data.get('mobileNumber') or data.get('phone')
-        address = data.get('communicationAddress') or data.get('address')
-        business_type = data.get('companyType') or data.get('businessType')
-        services = data.get('coreBusinessActivity') or data.get('services')
-        experience = data.get('typeOfActivity') or data.get('experience')
-        certifications = data.get('qualityCertifications') or data.get('certifications', '')
-        vendor_references = data.get('majorCustomers') or data.get('references', '')
+        # Extract comprehensive form data with fallbacks
+        company_name = data.get('companyName', '')
+        contact_person = data.get('contactPersonName', '')
+        email = data.get('emailAddress', '')
+        phone = data.get('phoneNumber', '') or data.get('phone', '')
+        address = data.get('communicationAddress', '') or data.get('address', '')
+        business_type = data.get('companyType', '') or data.get('businessType', '')
+        services = data.get('servicesOffered', '') or data.get('services', '')
+        experience = data.get('previousWorkExperience', '') or data.get('experience', '')
+        certifications = data.get('certifications', '')
+        vendor_references = data.get('majorCustomers', '') or data.get('references', '')
+        
+        print(f"Field mapping check:")
+        print(f"  companyName: '{company_name}' (type: {type(company_name)})")
+        print(f"  contactPersonName: '{contact_person}' (type: {type(contact_person)})")
+        print(f"  emailAddress: '{email}' (type: {type(email)})")
+        print(f"  phoneNumber: '{phone}' (type: {type(phone)})")
+        print(f"  communicationAddress: '{address}' (type: {type(address)})")
+        print(f"  companyType: '{business_type}' (type: {type(business_type)})")
+        print(f"  servicesOffered: '{services}' (type: {type(services)})")
+        print(f"  previousWorkExperience: '{experience}' (type: {type(experience)})")
+        
+        # Additional comprehensive fields
+        designation = data.get('designation', '')
+        registered_address = data.get('registeredOfficeAddress', '')
+        fax_number = data.get('faxNumber', '')
+        website = data.get('website', '')
+        nature_of_business = data.get('natureOfBusiness', '')
+        year_of_establishment = data.get('yearOfEstablishment', '')
+        pan_number = data.get('panNumber', '')
+        bank_name = data.get('bankName', '')
+        account_number = data.get('accountNumber', '')
+        ifsc_code = data.get('ifscCode', '')
+        branch_name = data.get('branchName', '')
+        annual_turnover = data.get('annualTurnover', '')
+        net_worth = data.get('netWorth', '')
+        total_employees = data.get('totalEmployees', '')
+        technical_staff = data.get('technicalStaff', '')
+        technical_capabilities = data.get('technicalCapabilities', '')
+        additional_info = data.get('additionalInformation', '')
+        organization_structure = data.get('organizationStructure', '')
+        supplier_bank_name = data.get('supplierBankName', '')
+        supplier_account_number = data.get('supplierAccountNumber', '')
+        supplier_ifsc_code = data.get('supplierIfscCode', '')
+        supplier_branch_name = data.get('supplierBranchName', '')
         
         print(f"Extracted fields - Company: {company_name}, Contact: {contact_person}, Email: {email}")
         
-        required_fields = [
-            company_name, contact_person, email, phone, address, business_type, services, experience
-        ]
+        # Check required fields (handle empty strings)
+        required_fields = [company_name, contact_person, email, phone, address]
+        required_field_names = ['company_name', 'contact_person', 'email', 'phone', 'address']
         
-        if not all(required_fields):
-            missing_fields = [field for field, value in zip(['company_name', 'contact_person', 'email', 'phone', 'address', 'business_type', 'services', 'experience'], required_fields) if not value]
+        missing_fields = []
+        for field_name, field_value in zip(required_field_names, required_fields):
+            if not field_value or (isinstance(field_value, str) and field_value.strip() == '') or field_value is None:
+                missing_fields.append(field_name)
+        
+        if missing_fields:
             print(f"Missing required fields: {missing_fields}")
             return jsonify({'error': f'Missing required fields: {", ".join(missing_fields)}'}), 400
         
-        check_query = "SELECT id FROM vendor_registrations WHERE email = %s"
-        existing = execute_query(check_query, (email,), fetch_one=True)
+        # Test database connection first
+        test_connection = get_db_connection()
+        if not test_connection:
+            print("❌ Database connection failed")
+            return jsonify({'error': 'Database connection failed. Please try again later.'}), 500
         
-        if existing:
-            print(f"Vendor with email {email} already exists")
-            return jsonify({'error': 'Vendor with this email already registered'}), 400
+        # Check if vendor already exists, create if not
+        check_query = "SELECT id FROM vendors WHERE email = %s"
+        existing_vendor = execute_query(check_query, (email,), fetch_one=True)
         
+        if existing_vendor:
+            vendor_id = existing_vendor['id']
+            print(f"Found existing vendor with ID: {vendor_id}")
+        else:
+            # Create new vendor record
+            print(f"Creating new vendor record for {email}")
+            vendor_insert_query = """
+            INSERT INTO vendors (company_name, contact_person, email, phone, address, 
+                               business_type, registration_status, portal_access, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, 'pending', 0, NOW())
+            """
+            vendor_id = execute_query(vendor_insert_query, (
+                company_name, contact_person, email, phone, address, business_type
+            ))
+            print(f"Created new vendor with ID: {vendor_id}")
+        
+        # Check if registration already exists by email
+        check_reg_query = "SELECT id FROM vendor_registrations WHERE email = %s"
+        existing_reg = execute_query(check_reg_query, (email,), fetch_one=True)
+        
+        if existing_reg:
+            print(f"Registration already exists for email {email}")
+            return jsonify({'error': 'Registration already submitted for this email'}), 400
+        
+        print(f"No existing registration found for email {email}, proceeding with new registration")
+        
+        # Store comprehensive form data using existing schema
         insert_query = """
         INSERT INTO vendor_registrations 
         (company_name, contact_person, email, phone, address, business_type, 
@@ -1339,13 +1650,22 @@ def register_vendor_detailed():
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', NOW())
         """
         
-        print(f"Executing insert query with data: {company_name}, {contact_person}, {email}")
+        print(f"Executing insert query for vendor: {company_name}")
         execute_query(insert_query, (
             company_name, contact_person, email, phone, address, business_type,
             services, experience, certifications, vendor_references
         ))
         
         print(f"Successfully inserted vendor registration for {company_name}")
+        
+        # Broadcast the new registration to connected clients
+        broadcast_database_change('vendor_registrations', 'insert', {
+            'company_name': company_name,
+            'contact_person': contact_person,
+            'email': email,
+            'status': 'pending'
+        })
+        
         return jsonify({
             'success': True,
             'message': 'Comprehensive vendor registration submitted successfully. You will receive an email once approved.'
@@ -1353,9 +1673,28 @@ def register_vendor_detailed():
         
     except Exception as e:
         print(f"Vendor registration error: {e}")
+        print(f"Error type: {type(e).__name__}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': 'Failed to submit vendor registration'}), 500
+        return jsonify({'error': f'Failed to submit vendor registration: {str(e)}'}), 500
+
+# Test endpoint to check database connection
+@app.route('/api/test-db', methods=['GET'])
+def test_database():
+    """Test database connection"""
+    try:
+        connection = get_db_connection()
+        if connection:
+            cursor = connection.cursor()
+            cursor.execute("SELECT 1 as test")
+            result = cursor.fetchone()
+            cursor.close()
+            connection.close()
+            return jsonify({'success': True, 'message': 'Database connection successful', 'test': result})
+        else:
+            return jsonify({'success': False, 'message': 'No database connection'}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Database error: {str(e)}'}), 500
 
 # Admin API endpoints for vendor registration management
 @app.route('/api/admin/vendor-registrations', methods=['GET'])
@@ -1388,136 +1727,109 @@ def approve_vendor_registration(registration_id):
         query = "SELECT * FROM vendor_registrations WHERE id = %s"
         registration = execute_query(query, (registration_id,), fetch_one=True)
         
+        print(f"=== APPROVE DEBUG ===")
+        print(f"Registration ID: {registration_id}")
+        print(f"Registration found: {registration is not None}")
+        if registration:
+            print(f"Current status: '{registration['status']}' (type: {type(registration['status'])})")
+            print(f"Status comparison: '{registration['status']}' != 'pending' = {registration['status'] != 'pending'}")
+        
         if not registration:
             return jsonify({'success': False, 'message': 'Registration not found'}), 404
         
-        if registration['status'] != 'pending':
-            return jsonify({'success': False, 'message': 'Registration is not pending'}), 400
+        if registration['status'] not in ['pending', None]:
+            print(f"Registration status is not pending: '{registration['status']}'")
+            return jsonify({'success': False, 'message': f'Registration is not pending (current status: {registration["status"]})'}), 400
         
+        # Update registration status
         update_query = "UPDATE vendor_registrations SET status = 'approved', updated_at = NOW() WHERE id = %s"
         execute_query(update_query, (registration_id,))
         
-        vendor_password = generate_vendor_password()
-        password_hash = bcrypt.hashpw(vendor_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        # Find vendor by email and update status
+        vendor_query = "SELECT id FROM vendors WHERE email = %s"
+        vendor = execute_query(vendor_query, (registration['email'],), fetch_one=True)
         
-        vendor_query = """
-        INSERT INTO vendors (email, company_name, contact_person, phone, address, nda_status, portal_access)
-        VALUES (%s, %s, %s, %s, %s, 'pending', 1)
-        """
-        vendor_id = execute_query(vendor_query, (
-            registration['email'],
-            registration['company_name'],
-            registration['contact_person'],
-            registration['phone'],
-            registration['address']
-        ))
-        
-        if vendor_id:
+        if vendor:
+            # Update vendor status to approved
+            vendor_update_query = "UPDATE vendors SET registration_status = 'approved', portal_access = 1 WHERE id = %s"
+            execute_query(vendor_update_query, (vendor['id'],))
+            
+            # Generate password for vendor login
+            vendor_password = generate_vendor_password()
+            password_hash = bcrypt.hashpw(vendor_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            
+            # Create vendor login
             login_query = """
-            INSERT INTO vendor_logins (vendor_id, email, password_hash, company_name, contact_person, phone, address, is_active)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO vendor_logins (vendor_id, email, password_hash, company_name, contact_person, phone, address)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE password_hash = %s, company_name = %s, contact_person = %s, phone = %s, address = %s
             """
             execute_query(login_query, (
-                vendor_id, registration['email'], password_hash,
-                registration['company_name'], registration['contact_person'],
-                registration['phone'], registration['address'], True
+                vendor['id'],
+                registration['email'],
+                password_hash,
+                registration['company_name'],
+                registration['contact_person'],
+                registration['phone'],
+                registration['address'],
+                password_hash,
+                registration['company_name'],
+                registration['contact_person'],
+                registration['phone'],
+                registration['address']
+            ))
+        else:
+            # Create new vendor if not found
+            vendor_insert_query = """
+                INSERT INTO vendors (company_name, contact_person, email, phone, address, 
+                                   business_type, registration_status, portal_access, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, 'approved', 1, NOW())
+                """
+            vendor_id = execute_query(vendor_insert_query, (
+                registration['company_name'], registration['contact_person'], registration['email'],
+                registration['phone'], registration['address'], registration['business_type']
             ))
             
-            check_query = "SELECT id FROM users WHERE email = %s"
-            existing_user = execute_query(check_query, (registration['email'],), fetch_one=True)
+            # Generate password for vendor login
+            vendor_password = generate_vendor_password()
+            password_hash = bcrypt.hashpw(vendor_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             
-            if existing_user:
-                user_query = """
-                UPDATE users SET password_hash = %s, user_type = %s, updated_at = %s
-                WHERE email = %s
-                """
-                execute_query(user_query, (password_hash, 'vendor', datetime.now(), registration['email']))
-            else:
-                user_query = """
-                INSERT INTO users (email, password_hash, name, user_type, created_at)
-                VALUES (%s, %s, %s, %s, %s)
-                """
-                execute_query(user_query, (
-                    registration['email'], password_hash, registration['contact_person'], 'vendor', datetime.now()
-                ))
-        
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = SMTP_USERNAME
-            msg['To'] = registration['email']
-            msg['Subject'] = "🎉 Portal Access Granted - YellowStone Xperiences"
-            
-            body = f"""
-Dear {registration['contact_person']},
-
-Congratulations! Your vendor registration has been approved and your portal access has been fully granted.
-
-COMPANY: {registration['company_name']}
-CONTACT PERSON: {registration['contact_person']}
-EMAIL: {registration['email']}
-
-LOGIN CREDENTIALS:
-Email: {registration['email']}
-Password: {vendor_password}
-Portal URL: https://yellowstonexperiences.com/vendor_portal/
-
-IMPORTANT SECURITY REQUIREMENTS:
-1. You are required to change your password immediately upon first login
-2. Maintain strict confidentiality of your login credentials
-3. Access the portal only from secure, authorized devices
-4. Report any suspicious activity immediately to our IT Security Department
-
-NEXT STEPS:
-- Log in to the portal using the provided credentials
-- Complete your profile setup
-- Review available partnership opportunities
-- Familiarize yourself with our vendor guidelines and procedures
-- Complete the NDA process to unlock full portal features
-
-PORTAL FEATURES AVAILABLE:
-✅ Vendor Dashboard Access
-✅ Project Opportunities
-✅ Task Management
-✅ Communication Portal
-✅ Document Management
-✅ Reporting Tools
-
-Should you encounter any technical difficulties or require assistance, please contact our Vendor Support Team at your earliest convenience.
-
-We look forward to a successful and mutually beneficial partnership.
-
-Yours sincerely,
-
-Harpreet Singh
-CEO
-YellowStone Xperiences Pvt Ltd
-Email: Harpreet.singh@yellowstonexps.com
-Phone: [Contact Number]
-Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India
-
----
-This is an automated message. Please do not reply to this email address.
+            # Create vendor login
+            login_query = """
+            INSERT INTO vendor_logins (vendor_id, email, password_hash, company_name, contact_person, phone, address)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             """
-            
-            msg.attach(MIMEText(body, 'plain'))
-            
-            print(f"Attempting to send approval email to {registration['email']}")
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-            server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            text = msg.as_string()
-            server.sendmail(SMTP_USERNAME, registration['email'], text)
-            server.quit()
-            
-            print(f"Approval email sent successfully to {registration['email']}")
-            
-        except Exception as email_error:
-            print(f"Approval email sending failed: {email_error}")
-            print(f"Email error type: {type(email_error).__name__}")
+            execute_query(login_query, (
+                vendor_id, 
+                registration['email'], 
+                password_hash,
+                registration['company_name'],
+                registration['contact_person'],
+                registration['phone'],
+                registration['address']
+            ))
+        
+        # Send credentials email to vendor
+        email_sent = send_vendor_credentials_email(
+            registration['email'], 
+            vendor_password, 
+            registration['company_name']
+        )
+        
+        # Broadcast the database change to connected clients
+        broadcast_database_change('vendor_registrations', 'update', {
+            'id': registration_id,
+            'status': 'approved',
+            'company_name': registration['company_name']
+        })
+        
+        email_status = "Credentials sent via email" if email_sent else "Warning: Email failed to send"
         
         return jsonify({
             'success': True,
-            'message': 'Vendor registration approved successfully. Login credentials have been sent via email.'
+            'message': f'Vendor registration approved successfully. {email_status}',
+            'vendor_password': vendor_password,
+            'email_sent': email_sent
         })
         
     except Exception as e:
@@ -1531,18 +1843,33 @@ def decline_vendor_registration(registration_id):
         query = "SELECT * FROM vendor_registrations WHERE id = %s"
         registration = execute_query(query, (registration_id,), fetch_one=True)
         
+        print(f"=== DECLINE DEBUG ===")
+        print(f"Registration ID: {registration_id}")
+        print(f"Registration found: {registration is not None}")
+        if registration:
+            print(f"Current status: '{registration['status']}' (type: {type(registration['status'])})")
+            print(f"Status comparison: '{registration['status']}' != 'pending' = {registration['status'] != 'pending'}")
+        
         if not registration:
             return jsonify({'success': False, 'message': 'Registration not found'}), 404
         
-        if registration['status'] != 'pending':
-            return jsonify({'success': False, 'message': 'Registration is not pending'}), 400
+        if registration['status'] not in ['pending', None]:
+            print(f"Registration status is not pending: '{registration['status']}'")
+            return jsonify({'success': False, 'message': f'Registration is not pending (current status: {registration["status"]})'}), 400
         
-        update_query = "UPDATE vendor_registrations SET status = 'declined', updated_at = NOW() WHERE id = %s"
+        update_query = "UPDATE vendor_registrations SET status = 'rejected', updated_at = NOW() WHERE id = %s"
         execute_query(update_query, (registration_id,))
+        
+        # Broadcast the database change to connected clients
+        broadcast_database_change('vendor_registrations', 'update', {
+            'id': registration_id,
+            'status': 'rejected',
+            'company_name': registration['company_name']
+        })
         
         return jsonify({
             'success': True,
-            'message': 'Vendor registration declined'
+            'message': 'Vendor registration rejected'
         })
         
     except Exception as e:
@@ -2301,18 +2628,135 @@ def get_admin_vendors():
 def get_admin_templates():
     """Get all form templates for admin view"""
     try:
-        # For now, return empty templates array since we don't have a templates table yet
-        # This will prevent the "Failed to load templates" error
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        cursor.execute("""
+            SELECT id, name, description, template_type, category, priority, 
+                   form_fields, status, created_at, created_by_name
+            FROM form_templates 
+            ORDER BY created_at DESC
+        """)
+        
+        templates = []
+        for row in cursor.fetchall():
+            templates.append({
+                'id': row[0],
+                'name': row[1],
+                'description': row[2],
+                'template_type': row[3],
+                'category': row[4],
+                'priority': row[5],
+                'form_fields': row[6],
+                'status': row[7],
+                'created_at': row[8].isoformat() if row[8] else None,
+                'created_by_name': row[9]
+            })
+        
+        cursor.close()
+        connection.close()
+        
         return jsonify({
             'success': True,
-            'templates': []
+            'templates': templates
         })
-        
     except Exception as e:
+        print(f"Error fetching templates: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
+        }), 500
+
+@app.route('/api/admin/templates', methods=['POST'])
+def create_template():
+    """Create a new form template"""
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['name', 'template_type']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'success': False, 'error': f'Missing required field: {field}'}), 400
+        
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # Insert new template
+        insert_query = """
+            INSERT INTO form_templates 
+            (name, description, template_type, category, priority, form_fields, status, created_at, created_by_name)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s)
+        """
+        
+        cursor.execute(insert_query, (
+            data.get('name'),
+            data.get('description', ''),
+            data.get('template_type'),
+            data.get('category', 'general'),
+            data.get('priority', 'medium'),
+            json.dumps(data.get('form_fields', {})),
+            data.get('status', 'draft'),
+            data.get('created_by_name', 'Admin')
+        ))
+        
+        template_id = cursor.lastrowid
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Template created successfully',
+            'template_id': template_id
         })
+        
+    except Exception as e:
+        print(f"Error creating template: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/admin/templates/<int:template_id>', methods=['DELETE'])
+def delete_template(template_id):
+    """Delete a form template"""
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        
+        # Check if template exists
+        cursor.execute("SELECT id FROM form_templates WHERE id = %s", (template_id,))
+        if not cursor.fetchone():
+            cursor.close()
+            connection.close()
+            return jsonify({'success': False, 'error': 'Template not found'}), 404
+        
+        # Delete template
+        cursor.execute("DELETE FROM form_templates WHERE id = %s", (template_id,))
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Template deleted successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error deleting template: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/api/admin/submitted-nda-forms', methods=['GET'])
 def get_submitted_nda_forms():
@@ -2766,6 +3210,617 @@ def serve_react_app_alt():
     """Alternative route to serve the React application"""
     return send_file('frontend/build/index.html')
 
+@app.route('/api/admin/broadcast-change', methods=['POST'])
+def manual_broadcast_change():
+    """Manually trigger a database change broadcast (for testing)"""
+    try:
+        data = request.get_json()
+        
+        table_name = data.get('table')
+        action = data.get('action')
+        change_data = data.get('data')
+        
+        if not all([table_name, action]):
+            return jsonify({'success': False, 'error': 'Missing required fields: table, action'}), 400
+        
+        # Broadcast the change
+        broadcast_database_change(table_name, action, change_data)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Broadcasted {action} on {table_name}',
+            'data': change_data
+        })
+        
+    except Exception as e:
+        print(f"Manual broadcast error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# WebSocket event handlers for real-time updates
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    print(f"Client connected: {request.sid}")
+    emit('connected', {'message': 'Connected to real-time updates'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    print(f"Client disconnected: {request.sid}")
+
+@socketio.on('join_room')
+def handle_join_room(data):
+    """Handle client joining a specific room for targeted updates"""
+    room = data.get('room', 'general')
+    join_room(room)
+    print(f"Client {request.sid} joined room: {room}")
+    emit('joined_room', {'room': room})
+
+@socketio.on('leave_room')
+def handle_leave_room(data):
+    """Handle client leaving a specific room"""
+    room = data.get('room', 'general')
+    leave_room(room)
+    print(f"Client {request.sid} left room: {room}")
+    emit('left_room', {'room': room})
+
+def send_vendor_credentials_email(vendor_email, vendor_password, company_name):
+    """Send vendor login credentials via email"""
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_USERNAME
+        msg['To'] = vendor_email
+        msg['Subject'] = "Your Vendor Portal Access - YellowStone XPs"
+        
+        body = f"""
+Dear Vendor,
+
+Congratulations! Your registration for {company_name} has been approved.
+
+You now have full access to the YellowStone XPs Vendor Portal.
+
+Your login credentials:
+Email: {vendor_email}
+Password: {vendor_password}
+
+Please log in at: http://localhost:3000/vendor-portal
+
+Important Security Notes:
+- Please change your password after first login
+- Keep your credentials secure
+- Contact support if you have any issues
+
+Best regards,
+YellowStone XPs Management Team
+        """
+        
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server.starttls()
+        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        text = msg.as_string()
+        server.sendmail(SMTP_USERNAME, vendor_email, text)
+        server.quit()
+        
+        print(f"✅ Credentials email sent to {vendor_email}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to send credentials email: {e}")
+        return False
+
+def broadcast_database_change(table_name, action, data=None, room='admin'):
+    """Broadcast database changes to connected clients"""
+    try:
+        message = {
+            'table': table_name,
+            'action': action,  # 'insert', 'update', 'delete'
+            'data': data,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Broadcast to specific room (admin dashboard)
+        socketio.emit('database_change', message, room=room)
+        
+        # Also broadcast to general room for any other listeners
+        socketio.emit('database_change', message, room='general')
+        
+        print(f"Broadcasted database change: {table_name} - {action} - {data}")
+        
+    except Exception as e:
+        print(f"Error broadcasting database change: {e}")
+
+# Frontend API endpoints (without /admin prefix)
+@app.route('/api/tasks', methods=['GET'])
+def get_tasks_frontend():
+    """Get all tasks for frontend"""
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tasks ORDER BY created_at DESC")
+        tasks = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'tasks': tasks
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/projects', methods=['GET'])
+def get_projects_frontend():
+    """Get all projects for frontend"""
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM projects ORDER BY created_at DESC")
+        projects = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'projects': projects
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/tickets', methods=['GET'])
+def get_tickets_frontend():
+    """Get all tickets for frontend"""
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM tickets ORDER BY created_at DESC")
+        tickets = cursor.fetchall()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'success': True,
+            'tickets': tickets
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/project-updates', methods=['GET'])
+def get_project_updates():
+    """Get all project updates"""
+    try:
+        return jsonify([])
+    except Exception as e:
+        return jsonify({'error': 'Failed to get project updates'}), 500
+
+@app.route('/api/admin/task-updates', methods=['GET'])
+def get_task_updates():
+    """Get all task updates"""
+    try:
+        return jsonify([])
+    except Exception as e:
+        return jsonify({'error': 'Failed to get task updates'}), 500
+
+@app.route('/api/admin/ticket-updates', methods=['GET'])
+def get_ticket_updates():
+    """Get all ticket updates"""
+    try:
+        return jsonify([])
+    except Exception as e:
+        return jsonify({'error': 'Failed to get ticket updates'}), 500
+
+# Employee-specific API endpoints
+@app.route('/api/employee/notifications', methods=['GET'])
+def get_employee_notifications():
+    """Get notifications for a specific employee"""
+    try:
+        employee_id = request.args.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'error': 'Employee ID required'}), 400
+        
+        # Return empty notifications for now
+        return jsonify({
+            'success': True,
+            'notifications': []
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/employee/announcements', methods=['GET'])
+def get_employee_announcements():
+    """Get announcements for a specific employee"""
+    try:
+        employee_id = request.args.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'error': 'Employee ID required'}), 400
+        
+        # Return empty announcements for now
+        return jsonify({
+            'success': True,
+            'announcements': []
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+
+@app.route('/api/debug/check-tickets-table', methods=['GET'])
+def check_tickets_table():
+    """Debug endpoint to check tickets table structure"""
+    try:
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        cursor.execute("DESCRIBE tickets")
+        table_structure = cursor.fetchall()
+        
+        cursor.execute("SELECT * FROM tickets LIMIT 1")
+        sample_data = cursor.fetchone()
+        
+        cursor.close()
+        connection.close()
+        
+        return jsonify({
+            'table_structure': table_structure,
+            'sample_data': sample_data
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/debug/employee-data', methods=['GET'])
+def debug_employee_data():
+    """Debug endpoint to check employee data"""
+    try:
+        employee_id = request.args.get('employee_id')
+        if not employee_id:
+            return jsonify({'error': 'Employee ID required'}), 400
+        
+        # Get all tickets
+        tickets_query = "SELECT * FROM tickets"
+        all_tickets = execute_query(tickets_query, fetch_all=True)
+        
+        # Get all projects  
+        projects_query = "SELECT * FROM projects"
+        all_projects = execute_query(projects_query, fetch_all=True)
+        
+        # Get all tasks
+        tasks_query = "SELECT * FROM tasks"
+        all_tasks = execute_query(tasks_query, fetch_all=True)
+        
+        return jsonify({
+            'employee_id': employee_id,
+            'all_tickets': all_tickets,
+            'all_projects': all_projects,
+            'all_tasks': all_tasks,
+            'tickets_for_employee': [t for t in all_tickets if str(t.get('assigned_to_id')) == str(employee_id) or str(t.get('created_by')) == str(employee_id)],
+            'projects_for_employee': [p for p in all_projects if str(p.get('assigned_to_id')) == str(employee_id)],
+            'tasks_for_employee': [t for t in all_tasks if str(t.get('assigned_to_id')) == str(employee_id)]
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/fix-employee-data', methods=['POST'])
+def fix_employee_data():
+    """Fix employee data by assigning existing data to the correct employee"""
+    try:
+        data = request.get_json()
+        employee_id = data.get('employee_id')
+        if not employee_id:
+            return jsonify({'error': 'Employee ID required'}), 400
+        
+        # Update existing tickets to be assigned to this employee
+        tickets_query = "UPDATE tickets SET assigned_to_id = %s WHERE assigned_to_id = 17"
+        execute_query(tickets_query, (employee_id,))
+        
+        # Update existing projects to be assigned to this employee
+        projects_query = "UPDATE projects SET assigned_to_id = %s WHERE assigned_to_id = 17"
+        execute_query(projects_query, (employee_id,))
+        
+        # Update existing tasks to be assigned to this employee
+        tasks_query = "UPDATE tasks SET assigned_to_id = %s WHERE assigned_to_id = 17"
+        execute_query(tasks_query, (employee_id,))
+        
+        return jsonify({
+            'success': True,
+            'message': f'Updated all data to be assigned to employee {employee_id}'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/employee/create-ticket', methods=['POST'])
+def create_employee_ticket():
+    """Create a ticket for an employee"""
+    try:
+        data = request.get_json()
+        employee_id = data.get('employee_id')
+        title = data.get('title', 'Untitled Ticket')
+        description = data.get('description', '')
+        
+        # Map frontend priority values to database values (based on actual database values)
+        priority_mapping = {
+            'urgent': 'Critical',
+            'high': 'Critical', 
+            'medium': 'Medium',
+            'low': 'Low'
+        }
+        priority = priority_mapping.get(data.get('priority', '').lower(), 'Medium')
+        
+        # Map frontend category values to database values
+        category_mapping = {
+            'it support': 'technical',
+            'technical': 'technical',
+            'general': 'general',
+            'bug': 'bug',
+            'feature': 'feature'
+        }
+        category = category_mapping.get(data.get('category', '').lower(), 'general')
+        
+        if not employee_id:
+            return jsonify({'success': False, 'error': 'Employee ID required'}), 400
+        
+        # Get employee details
+        employee_query = "SELECT name, email FROM users WHERE id = %s"
+        employee = execute_query(employee_query, (employee_id,), fetch_one=True)
+        
+        if not employee:
+            return jsonify({'success': False, 'error': 'Employee not found'}), 404
+        
+        # Insert ticket into database
+        connection = get_db_connection()
+        if not connection:
+            return jsonify({'success': False, 'error': 'Database connection failed'}), 500
+        
+        cursor = connection.cursor()
+        ticket_query = """
+        INSERT INTO tickets (title, description, priority, status, category, assigned_to, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        # Get employee name for created_by field
+        employee_name = employee['name']
+        
+        cursor.execute(ticket_query, (
+            title,
+            description,
+            priority,
+            'open',
+            category,
+            category,  # assigned_to will temporarily contain the category
+            employee_name  # created_by will contain the employee's name
+        ))
+        
+        ticket_id = cursor.lastrowid
+        connection.commit()
+        cursor.close()
+        connection.close()
+        
+        if ticket_id:
+            print(f"✅ Ticket created successfully: ID {ticket_id} by employee {employee_id}")
+            
+            # Broadcast the change to admin dashboard
+            broadcast_database_change('tickets', 'insert', {
+                'id': ticket_id,
+                'title': title,
+                'priority': priority,
+                'status': 'open',
+                'assigned_to_name': employee['name'],
+                'assigned_to_email': employee['email']
+            })
+            
+            return jsonify({
+                'success': True,
+                'message': 'Ticket created successfully',
+                'ticket_id': ticket_id
+            })
+        else:
+            return jsonify({'success': False, 'error': 'Failed to create ticket'}), 500
+            
+    except Exception as e:
+        print(f"❌ Error creating employee ticket: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/employee/projects/<int:project_id>/update', methods=['POST', 'PUT'])
+def update_employee_project(project_id):
+    """Update project status and comments for employee"""
+    try:
+        data = request.get_json()
+        status = data.get('status')
+        comments = data.get('comments', '')
+        
+        # Update project status and comments
+        update_query = """
+        UPDATE projects 
+        SET status = %s, updated_at = NOW()
+        WHERE id = %s
+        """
+        
+        execute_query(update_query, (status, project_id))
+        
+        # Broadcast the change
+        broadcast_database_change('projects', 'update', {
+            'id': project_id,
+            'status': status,
+            'comments': comments
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Project updated successfully'
+        })
+        
+    except Exception as e:
+        print(f"❌ Error updating employee project: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/employee/tasks/<int:task_id>/update', methods=['POST', 'PUT'])
+def update_employee_task(task_id):
+    """Update task status and comments for employee"""
+    try:
+        data = request.get_json()
+        status = data.get('status')
+        comments = data.get('comments', '')
+        
+        # Update task status and comments
+        update_query = """
+        UPDATE tasks 
+        SET status = %s, updated_at = NOW()
+        WHERE id = %s
+        """
+        
+        execute_query(update_query, (status, task_id))
+        
+        # Broadcast the change
+        broadcast_database_change('tasks', 'update', {
+            'id': task_id,
+            'status': status,
+            'comments': comments
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Task updated successfully'
+        })
+        
+    except Exception as e:
+        print(f"❌ Error updating employee task: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/employee/tickets/<int:ticket_id>/update', methods=['POST', 'PUT'])
+def update_employee_ticket(ticket_id):
+    """Update ticket status and comments for employee"""
+    try:
+        data = request.get_json()
+        status = data.get('status')
+        comments = data.get('comments', '')
+        
+        # Update ticket status and comments
+        update_query = """
+        UPDATE tickets 
+        SET status = %s, updated_at = NOW()
+        WHERE id = %s
+        """
+        
+        execute_query(update_query, (status, ticket_id))
+        
+        # Broadcast the change
+        broadcast_database_change('tickets', 'update', {
+            'id': ticket_id,
+            'status': status,
+            'comments': comments
+        })
+        
+        return jsonify({
+            'success': True,
+            'message': 'Ticket updated successfully'
+        })
+        
+    except Exception as e:
+        print(f"❌ Error updating employee ticket: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/employee/upload-profile-picture', methods=['POST'])
+def upload_profile_picture():
+    """Upload profile picture for the current user"""
+    try:
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        if file and file.filename.lower().endswith(tuple(ALLOWED_IMAGE_EXTENSIONS)):
+            # Generate unique filename
+            filename = f"{user_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
+            file_path = os.path.join(PROFILE_PHOTOS_FOLDER, filename)
+            
+            # Save the file
+            file.save(file_path)
+            
+            # Update database with new profile picture path
+            update_query = "UPDATE users SET profile_picture = %s WHERE id = %s"
+            execute_query(update_query, (filename, user_id))
+            
+            return jsonify({
+                'success': True,
+                'message': 'Profile picture uploaded successfully',
+                'filename': filename
+            })
+        else:
+            return jsonify({'error': 'Invalid file type. Only PNG, JPG, JPEG, and GIF are allowed.'}), 400
+            
+    except Exception as e:
+        print(f"❌ Upload profile picture error: {e}")
+        return jsonify({'error': 'Failed to upload profile picture'}), 500
+
+@app.route('/api/employee/remove-profile-picture', methods=['POST'])
+def remove_profile_picture():
+    """Remove profile picture for the current user"""
+    try:
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        # Get current user's profile picture path
+        query = "SELECT profile_picture FROM users WHERE id = %s"
+        user = execute_query(query, (user_id,), fetch_one=True)
+        
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        profile_picture_path = user.get('profile_picture')
+        
+        # Remove profile picture from database
+        update_query = "UPDATE users SET profile_picture = NULL WHERE id = %s"
+        execute_query(update_query, (user_id,))
+        
+        # Delete the actual file if it exists
+        if profile_picture_path:
+            try:
+                file_path = os.path.join(PROFILE_PHOTOS_FOLDER, profile_picture_path)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    print(f"✅ Profile picture file deleted: {file_path}")
+            except Exception as e:
+                print(f"⚠️ Could not delete profile picture file: {e}")
+        
+        return jsonify({
+            'success': True,
+            'message': 'Profile picture removed successfully'
+        })
+        
+    except Exception as e:
+        print(f"❌ Remove profile picture error: {e}")
+        return jsonify({'error': 'Failed to remove profile picture'}), 500
+
+@app.route('/api/employee/profile-picture/<filename>')
+def get_profile_picture(filename):
+    """Serve profile picture files"""
+    try:
+        return send_from_directory(PROFILE_PHOTOS_FOLDER, filename)
+    except Exception as e:
+        print(f"❌ Error serving profile picture: {e}")
+        return jsonify({'error': 'Profile picture not found'}), 404
+
 if __name__ == '__main__':
-    print("Starting Flask server...")
-    app.run(debug=False, host='0.0.0.0', port=8000)
+    print("Starting Flask server with WebSocket support...")
+    socketio.run(app, debug=False, host='0.0.0.0', port=8000)

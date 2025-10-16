@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Users, FileText, CheckCircle, Bell, LogOut, Home, Briefcase,
-  BarChart3, Settings, Send, Download, Plus, TrendingUp, Menu, X, CheckSquare, Ticket, ClipboardList
+  BarChart3, Settings, Send, Download, Plus, TrendingUp, Menu, X, CheckSquare, Ticket, ClipboardList, ChevronDown
 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import StatsCard from './StatsCard';
@@ -19,9 +19,11 @@ import TicketsView from './TicketsView';
 import AttendanceView from './AttendanceView';
 import SendNDAModal from './SendNDAModal';
 import BulkSendNDAModal from './BulkSendNDAModal';
+import { useSocket } from '../contexts/SocketContext';
 
 const AdminDashboard = ({ user, onLogout }) => {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [vendorsDropdownOpen, setVendorsDropdownOpen] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [submittedForms, setSubmittedForms] = useState([]);
   const [stats, setStats] = useState({});
@@ -34,10 +36,47 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showReports, setShowReports] = useState(false);
+  const { isConnected } = useSocket();
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Listen for real-time database changes
+  useEffect(() => {
+    const handleDatabaseChange = (event) => {
+      const change = event.detail;
+      console.log('AdminDashboard received database change:', change);
+      
+      // Reload dashboard data when there are changes
+      if (change.table === 'vendor_registrations' || change.table === 'vendors' || 
+          change.table === 'tickets' || change.table === 'tasks' || change.table === 'projects') {
+        loadData();
+      }
+    };
+
+    // Add event listener for database changes
+    window.addEventListener('databaseChange', handleDatabaseChange);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('databaseChange', handleDatabaseChange);
+    };
+  }, []);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (vendorsDropdownOpen && !event.target.closest('.vendors-dropdown')) {
+        setVendorsDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [vendorsDropdownOpen]);
 
   const loadData = async () => {
     try {
@@ -193,7 +232,19 @@ const AdminDashboard = ({ user, onLogout }) => {
           </div>
           <div>
             <h1 className="text-xl font-bold text-gray-900">YellowStone XPs</h1>
-            <p className="text-xs text-gray-500">Management Portal</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-gray-500">Management Portal</p>
+              <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                isConnected 
+                  ? 'bg-green-100 text-green-700' 
+                  : 'bg-red-100 text-red-700'
+              }`}>
+                <div className={`w-1.5 h-1.5 rounded-full ${
+                  isConnected ? 'bg-green-500' : 'bg-red-500'
+                }`}></div>
+                {isConnected ? 'Live' : 'Offline'}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -203,31 +254,76 @@ const AdminDashboard = ({ user, onLogout }) => {
             {[
               { id: 'dashboard', label: 'Dashboard', icon: Home },
               { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-              { id: 'vendors', label: 'Vendors', icon: Users },
-              { id: 'registration-forms', label: 'Registration Forms', icon: ClipboardList },
-              { id: 'forms', label: 'Forms', icon: FileText },
-              { id: 'nda-forms', label: 'NDA Forms', icon: FileText },
+              { 
+                id: 'vendors', 
+                label: 'Vendors', 
+                icon: Users, 
+                hasDropdown: true,
+                dropdownItems: [
+                  { id: 'vendors', label: 'Vendors List', icon: Users },
+                  { id: 'registration-forms', label: 'Registration Forms', icon: ClipboardList },
+                  { id: 'forms', label: 'Forms', icon: FileText },
+                  { id: 'nda-forms', label: 'NDA Forms', icon: FileText }
+                ]
+              },
               { id: 'tasks', label: 'Tasks', icon: CheckSquare },
               { id: 'projects', label: 'Projects', icon: Briefcase },
               { id: 'tickets', label: 'Tickets', icon: Ticket },
               { id: 'attendance', label: 'Attendance Info', icon: CheckCircle },
               { id: 'organization', label: 'Organization', icon: Users }
             ].map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  setSidebarOpen(false); // Close sidebar on mobile after selection
-                }}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                  activeTab === tab.id
-                    ? 'bg-amber-50 text-amber-600 border-r-2 border-amber-500'
-                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                }`}
-              >
-                <tab.icon size={20} />
-                {tab.label}
-              </button>
+              <div key={tab.id} className={tab.hasDropdown ? 'vendors-dropdown' : ''}>
+                <button
+                  onClick={() => {
+                    if (tab.hasDropdown) {
+                      setVendorsDropdownOpen(!vendorsDropdownOpen);
+                    } else {
+                      setActiveTab(tab.id);
+                      setSidebarOpen(false); // Close sidebar on mobile after selection
+                    }
+                  }}
+                  className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg transition-colors ${
+                    (tab.hasDropdown && vendorsDropdownOpen) || (!tab.hasDropdown && activeTab === tab.id)
+                      ? 'bg-amber-50 text-amber-600 border-r-2 border-amber-500'
+                      : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <tab.icon size={20} />
+                    {tab.label}
+                  </div>
+                  {tab.hasDropdown && (
+                    <ChevronDown 
+                      size={16} 
+                      className={`transition-transform ${vendorsDropdownOpen ? 'rotate-180' : ''}`}
+                    />
+                  )}
+                </button>
+                
+                {/* Dropdown Menu */}
+                {tab.hasDropdown && vendorsDropdownOpen && (
+                  <div className="ml-4 mt-2 space-y-1">
+                    {tab.dropdownItems.map(item => (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          setVendorsDropdownOpen(false);
+                          setSidebarOpen(false); // Close sidebar on mobile after selection
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg transition-colors text-sm ${
+                          activeTab === item.id
+                            ? 'bg-amber-50 text-amber-600 border-r-2 border-amber-500'
+                            : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                        }`}
+                      >
+                        <item.icon size={16} />
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </nav>
@@ -263,7 +359,7 @@ const AdminDashboard = ({ user, onLogout }) => {
                 
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900 capitalize">
-                    {activeTab.replace('-', ' ')}
+                    {activeTab === 'vendors' ? 'Vendors List' : activeTab.replace('-', ' ')}
                   </h2>
                   <p className="text-gray-600">Welcome back, {user.name || 'Admin'}!</p>
                 </div>

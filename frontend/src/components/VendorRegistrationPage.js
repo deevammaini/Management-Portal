@@ -12,22 +12,6 @@ const VendorRegistrationPage = ({ onLogin }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [user, setUser] = useState(null);
-  const [registrationForm, setRegistrationForm] = useState({
-    companyName: '',
-    contactPersonName: '',
-    emailAddress: '',
-    phoneNumber: '',
-    address: '',
-    businessType: '',
-    taxId: '',
-    website: '',
-    description: '',
-    capabilities: '',
-    certifications: '',
-    references: '',
-    ndaStatus: '',
-    referenceNumber: ''
-  });
   const navigate = useNavigate();
 
   const handleTemporaryLogin = async () => {
@@ -42,14 +26,6 @@ const VendorRegistrationPage = ({ onLogin }) => {
       
       if (response.success) {
         setUser(response.user);
-        setRegistrationForm(prev => ({
-          ...prev,
-          companyName: response.user.company || '',
-          contactPersonName: response.user.contact_person || '',
-          emailAddress: response.user.email || '',
-          ndaStatus: response.user.nda_status || '',
-          referenceNumber: response.user.reference_number || ''
-        }));
         setShowLoginForm(false);
         setShowDashboard(true);
         onLogin(response.user);
@@ -63,11 +39,12 @@ const VendorRegistrationPage = ({ onLogin }) => {
     }
   };
 
-  const handleRegistrationSubmit = async () => {
+  const handleRegistrationSubmit = async (comprehensiveFormData) => {
     try {
+      console.log('VendorRegistrationPage: Submitting comprehensive form data:', comprehensiveFormData);
       const response = await apiCall('/api/vendor/register', {
         method: 'POST',
-        body: JSON.stringify(registrationForm)
+        body: JSON.stringify(comprehensiveFormData)
       });
       
       if (response.success) {
@@ -80,12 +57,6 @@ const VendorRegistrationPage = ({ onLogin }) => {
     }
   };
 
-  const handleInputChange = (field, value) => {
-    setRegistrationForm(prev => ({
-      ...prev,
-      [field]: value
-    }));
-  };
 
   // Registration Dashboard Component
   const RegistrationDashboard = () => (
@@ -213,8 +184,6 @@ const VendorRegistrationPage = ({ onLogin }) => {
         isOpen={showRegistrationForm}
         onClose={() => setShowRegistrationForm(false)}
         onSubmit={handleRegistrationSubmit}
-        formData={registrationForm}
-        onInputChange={handleInputChange}
       />
     </div>
   );

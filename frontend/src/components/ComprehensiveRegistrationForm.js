@@ -4,13 +4,161 @@ import {
   Upload, X, CheckCircle, AlertCircle, Calendar, CreditCard,
   Users, Settings, Award, ClipboardList
 } from 'lucide-react';
-import TermsAndConditions from './TermsAndConditions';
-import PrivacyPolicy from './PrivacyPolicy';
 
-const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, onInputChange }) => {
+// Mock Terms and Conditions Component
+const TermsAndConditions = ({ onClose }) => (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+      <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold">Terms and Conditions</h2>
+          <button type="button" onClick={onClose} className="text-white hover:text-gray-200">
+            <X size={24} />
+          </button>
+        </div>
+      </div>
+      <div className="p-6 overflow-y-auto max-h-[60vh]">
+        <p className="text-gray-700 mb-4">
+          These are the terms and conditions for vendor registration. Please read carefully before accepting.
+        </p>
+        <p className="text-gray-700">
+          By registering as a vendor, you agree to comply with all company policies and regulations.
+        </p>
+      </div>
+      <div className="bg-gray-50 px-6 py-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all duration-200 font-medium"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+// Mock Privacy Policy Component
+const PrivacyPolicy = ({ onClose }) => (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+      <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-6">
+        <div className="flex justify-between items-center">
+          <h2 className="text-2xl font-bold">Privacy Policy</h2>
+          <button type="button" onClick={onClose} className="text-white hover:text-gray-200">
+            <X size={24} />
+          </button>
+        </div>
+      </div>
+      <div className="p-6 overflow-y-auto max-h-[60vh]">
+        <p className="text-gray-700 mb-4">
+          This privacy policy outlines how we collect, use, and protect your information.
+        </p>
+        <p className="text-gray-700">
+          Your personal information will be kept confidential and used only for vendor registration purposes.
+        </p>
+      </div>
+      <div className="bg-gray-50 px-6 py-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all duration-200 font-medium"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+);
+
+const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit }) => {
   const [currentSection, setCurrentSection] = useState(0);
   const [showTermsModal, setShowTermsModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  
+  // Internal form data state
+  const [formData, setFormData] = useState({
+    // Company Details
+    companyName: '',
+    companyType: '',
+    proprietorPhoto: null,
+    
+    // Contact Person
+    contactPersonName: '',
+    designation: '',
+    contactPersonPhoto: null,
+    
+    // Address
+    communicationAddress: '',
+    registeredOfficeAddress: '',
+    
+    // Contact Details
+    emailAddress: '',
+    phoneNumber: '',
+    faxNumber: '',
+    website: '',
+    
+    // Business Details
+    natureOfBusiness: '',
+    yearOfEstablishment: '',
+    panNumber: '',
+    
+    // Bank Details
+    bankName: '',
+    accountNumber: '',
+    ifscCode: '',
+    branchName: '',
+    
+    // Customers and Services
+    majorCustomers: '',
+    servicesOffered: '',
+    
+    // Business Turnover
+    annualTurnover: '',
+    netWorth: '',
+    
+    // Previous Work
+    previousWorkExperience: '',
+    
+    // Certifications
+    certifications: '',
+    
+    // Manpower Details
+    totalEmployees: '',
+    technicalStaff: '',
+    
+    // Capabilities
+    technicalCapabilities: '',
+    
+    // General Information
+    additionalInformation: '',
+    
+    // Organization
+    organizationStructure: '',
+    
+    // Declaration
+    declaration1: false,
+    declaration2: false,
+    
+    // Supplier Bank Details
+    supplierBankName: '',
+    supplierAccountNumber: '',
+    supplierIfscCode: '',
+    supplierBranchName: ''
+  });
+  
+  // Internal input change handler
+  const handleInputChange = (field, value) => {
+    console.log(`Form field changed: ${field} = "${value}"`);
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+  
+  // Debug: Log component state
+  console.log('ComprehensiveRegistrationForm rendered, currentSection:', currentSection);
+  console.log('Current form data:', formData);
   
   const sections = [
     { id: 'company', title: 'Company Details', icon: Building },
@@ -39,7 +187,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.companyName || ''}
-            onChange={(e) => onInputChange('companyName', e.target.value)}
+            onChange={(e) => handleInputChange('companyName', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter company name"
           />
@@ -48,7 +196,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <label className="block text-sm font-medium text-gray-700 mb-2">Type of Company *</label>
           <select
             value={formData.companyType || ''}
-            onChange={(e) => onInputChange('companyType', e.target.value)}
+            onChange={(e) => handleInputChange('companyType', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           >
             <option value="">Select Company Type</option>
@@ -64,7 +212,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
         <input
           type="file"
           accept="image/*"
-          onChange={(e) => onInputChange('proprietorPhoto', e.target.files[0])}
+          onChange={(e) => handleInputChange('proprietorPhoto', e.target.files[0])}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
         />
         <p className="text-xs text-gray-500 mt-1">Upload recent photograph (in case of public ltd, upload marketing manager/account head photograph)</p>
@@ -80,7 +228,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.contactPersonName || ''}
-            onChange={(e) => onInputChange('contactPersonName', e.target.value)}
+            onChange={(e) => handleInputChange('contactPersonName', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter contact person name"
           />
@@ -90,7 +238,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.contactPersonDesignation || ''}
-            onChange={(e) => onInputChange('contactPersonDesignation', e.target.value)}
+            onChange={(e) => handleInputChange('contactPersonDesignation', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter designation"
           />
@@ -101,7 +249,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
         <input
           type="file"
           accept="image/*"
-          onChange={(e) => onInputChange('visitingCard', e.target.files[0])}
+          onChange={(e) => handleInputChange('visitingCard', e.target.files[0])}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
         />
       </div>
@@ -114,7 +262,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
         <label className="block text-sm font-medium text-gray-700 mb-2">Communication Address *</label>
         <textarea
           value={formData.communicationAddress || ''}
-          onChange={(e) => onInputChange('communicationAddress', e.target.value)}
+          onChange={(e) => handleInputChange('communicationAddress', e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={3}
           placeholder="Enter complete communication address"
@@ -124,7 +272,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
         <label className="block text-sm font-medium text-gray-700 mb-2">Registered Office Address</label>
         <textarea
           value={formData.registeredOfficeAddress || ''}
-          onChange={(e) => onInputChange('registeredOfficeAddress', e.target.value)}
+          onChange={(e) => handleInputChange('registeredOfficeAddress', e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={3}
           placeholder="Enter registered office address (if different)"
@@ -141,7 +289,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="email"
             value={formData.emailAddress || ''}
-            onChange={(e) => onInputChange('emailAddress', e.target.value)}
+            onChange={(e) => handleInputChange('emailAddress', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter email address"
           />
@@ -151,7 +299,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="tel"
             value={formData.phoneNumber || ''}
-            onChange={(e) => onInputChange('phoneNumber', e.target.value)}
+            onChange={(e) => handleInputChange('phoneNumber', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter phone number"
           />
@@ -163,7 +311,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="tel"
             value={formData.faxNumber || ''}
-            onChange={(e) => onInputChange('faxNumber', e.target.value)}
+            onChange={(e) => handleInputChange('faxNumber', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter fax number"
           />
@@ -173,7 +321,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="url"
             value={formData.website || ''}
-            onChange={(e) => onInputChange('website', e.target.value)}
+            onChange={(e) => handleInputChange('website', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter website URL"
           />
@@ -190,7 +338,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.natureOfBusiness || ''}
-            onChange={(e) => onInputChange('natureOfBusiness', e.target.value)}
+            onChange={(e) => handleInputChange('natureOfBusiness', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter nature of business"
           />
@@ -200,20 +348,20 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="number"
             value={formData.yearOfEstablishment || ''}
-            onChange={(e) => onInputChange('yearOfEstablishment', e.target.value)}
+            onChange={(e) => handleInputChange('yearOfEstablishment', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter year"
             min="1900"
             max="2024"
           />
         </div>
-      </div>
-      <div>
+        </div>
+        <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">PAN Number *</label>
         <input
           type="text"
           value={formData.panNumber || ''}
-          onChange={(e) => onInputChange('panNumber', e.target.value)}
+          onChange={(e) => handleInputChange('panNumber', e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           placeholder="Enter PAN number"
           maxLength="10"
@@ -230,7 +378,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.bankName || ''}
-            onChange={(e) => onInputChange('bankName', e.target.value)}
+            onChange={(e) => handleInputChange('bankName', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter bank name"
           />
@@ -240,7 +388,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.accountNumber || ''}
-            onChange={(e) => onInputChange('accountNumber', e.target.value)}
+            onChange={(e) => handleInputChange('accountNumber', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter account number"
           />
@@ -252,7 +400,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.ifscCode || ''}
-            onChange={(e) => onInputChange('ifscCode', e.target.value)}
+            onChange={(e) => handleInputChange('ifscCode', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter IFSC code"
           />
@@ -262,7 +410,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.branchName || ''}
-            onChange={(e) => onInputChange('branchName', e.target.value)}
+            onChange={(e) => handleInputChange('branchName', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter branch name"
           />
@@ -277,7 +425,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
         <label className="block text-sm font-medium text-gray-700 mb-2">Major Customers</label>
         <textarea
           value={formData.majorCustomers || ''}
-          onChange={(e) => onInputChange('majorCustomers', e.target.value)}
+          onChange={(e) => handleInputChange('majorCustomers', e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={4}
           placeholder="List major customers"
@@ -287,7 +435,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
         <label className="block text-sm font-medium text-gray-700 mb-2">Services Offered</label>
         <textarea
           value={formData.servicesOffered || ''}
-          onChange={(e) => onInputChange('servicesOffered', e.target.value)}
+          onChange={(e) => handleInputChange('servicesOffered', e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={4}
           placeholder="Describe services offered"
@@ -299,38 +447,38 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
   const renderBusinessTurnover = () => (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
+              <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Annual Turnover (Last 3 Years)</label>
-          <input
-            type="text"
+                <input
+                  type="text"
             value={formData.annualTurnover || ''}
-            onChange={(e) => onInputChange('annualTurnover', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+            onChange={(e) => handleInputChange('annualTurnover', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter annual turnover"
-          />
-        </div>
-        <div>
+                />
+              </div>
+              <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Net Worth</label>
-          <input
-            type="text"
+                <input
+                  type="text"
             value={formData.netWorth || ''}
-            onChange={(e) => onInputChange('netWorth', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+            onChange={(e) => handleInputChange('netWorth', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter net worth"
-          />
-        </div>
+                />
+              </div>
       </div>
     </div>
   );
 
   const renderPreviousWork = () => (
     <div className="space-y-6">
-      <div>
+              <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Previous Work Experience</label>
-        <textarea
+                <textarea
           value={formData.previousWorkExperience || ''}
-          onChange={(e) => onInputChange('previousWorkExperience', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+          onChange={(e) => handleInputChange('previousWorkExperience', e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={6}
           placeholder="Describe previous work experience and projects"
         />
@@ -344,7 +492,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
         <label className="block text-sm font-medium text-gray-700 mb-2">Certifications & Licenses</label>
         <textarea
           value={formData.certifications || ''}
-          onChange={(e) => onInputChange('certifications', e.target.value)}
+          onChange={(e) => handleInputChange('certifications', e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={6}
           placeholder="List all certifications and licenses"
@@ -361,7 +509,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="number"
             value={formData.totalEmployees || ''}
-            onChange={(e) => onInputChange('totalEmployees', e.target.value)}
+            onChange={(e) => handleInputChange('totalEmployees', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter total number of employees"
             min="0"
@@ -372,7 +520,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="number"
             value={formData.technicalStaff || ''}
-            onChange={(e) => onInputChange('technicalStaff', e.target.value)}
+            onChange={(e) => handleInputChange('technicalStaff', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter number of technical staff"
             min="0"
@@ -386,10 +534,10 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
     <div className="space-y-6">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Technical Capabilities</label>
-        <textarea
+            <textarea
           value={formData.technicalCapabilities || ''}
-          onChange={(e) => onInputChange('technicalCapabilities', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+          onChange={(e) => handleInputChange('technicalCapabilities', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={6}
           placeholder="Describe technical capabilities and expertise"
         />
@@ -399,12 +547,12 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
 
   const renderGeneralInformation = () => (
     <div className="space-y-6">
-      <div>
+        <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Additional Information</label>
         <textarea
           value={formData.additionalInformation || ''}
-          onChange={(e) => onInputChange('additionalInformation', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+          onChange={(e) => handleInputChange('additionalInformation', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={6}
           placeholder="Any additional information you'd like to provide"
         />
@@ -416,10 +564,10 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
     <div className="space-y-6">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">Organization Structure</label>
-        <textarea
+            <textarea
           value={formData.organizationStructure || ''}
-          onChange={(e) => onInputChange('organizationStructure', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+          onChange={(e) => handleInputChange('organizationStructure', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           rows={6}
           placeholder="Describe organization structure"
         />
@@ -433,10 +581,10 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
         <h3 className="text-lg font-semibold text-amber-800 mb-4">Declaration</h3>
         <div className="space-y-4">
           <label className="flex items-start space-x-3">
-            <input
+              <input
               type="checkbox"
               checked={formData.declaration1 || false}
-              onChange={(e) => onInputChange('declaration1', e.target.checked)}
+              onChange={(e) => handleInputChange('declaration1', e.target.checked)}
               className="mt-1 h-4 w-4 text-amber-600 focus:ring-amber-500 border-gray-300 rounded"
             />
             <span className="text-sm text-gray-700">
@@ -444,16 +592,16 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
             </span>
           </label>
           <label className="flex items-start space-x-3">
-            <input
-              type="checkbox"
+              <input
+                type="checkbox"
               checked={formData.declaration2 || false}
-              onChange={(e) => onInputChange('declaration2', e.target.checked)}
-              className="mt-1 h-4 w-4 text-amber-600 focus:ring-amber-500 border-gray-300 rounded"
+              onChange={(e) => handleInputChange('declaration2', e.target.checked)}
+                className="mt-1 h-4 w-4 text-amber-600 focus:ring-amber-500 border-gray-300 rounded"
             />
             <span className="text-sm text-gray-700">
               I agree to the <button type="button" onClick={() => setShowTermsModal(true)} className="text-amber-600 hover:text-amber-700 underline">Terms and Conditions</button> and <button type="button" onClick={() => setShowPrivacyModal(true)} className="text-amber-600 hover:text-amber-700 underline">Privacy Policy</button>.
             </span>
-          </label>
+              </label>
         </div>
       </div>
     </div>
@@ -467,7 +615,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.supplierBankName || ''}
-            onChange={(e) => onInputChange('supplierBankName', e.target.value)}
+            onChange={(e) => handleInputChange('supplierBankName', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter supplier bank name"
           />
@@ -477,19 +625,19 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.supplierAccountNumber || ''}
-            onChange={(e) => onInputChange('supplierAccountNumber', e.target.value)}
+            onChange={(e) => handleInputChange('supplierAccountNumber', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter supplier account number"
           />
         </div>
-      </div>
+        </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Supplier IFSC Code</label>
           <input
             type="text"
             value={formData.supplierIfscCode || ''}
-            onChange={(e) => onInputChange('supplierIfscCode', e.target.value)}
+            onChange={(e) => handleInputChange('supplierIfscCode', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter supplier IFSC code"
           />
@@ -499,7 +647,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <input
             type="text"
             value={formData.supplierBranchName || ''}
-            onChange={(e) => onInputChange('supplierBranchName', e.target.value)}
+            onChange={(e) => handleInputChange('supplierBranchName', e.target.value)}
             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             placeholder="Enter supplier branch name"
           />
@@ -531,14 +679,29 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
   };
 
   const nextSection = () => {
+    console.log('=== NEXT BUTTON CLICKED ===');
+    console.log('currentSection:', currentSection);
+    console.log('sections.length:', sections.length);
+    
     if (currentSection < sections.length - 1) {
+      console.log('Moving to section:', currentSection + 1);
       setCurrentSection(currentSection + 1);
+      console.log('Navigation successful');
+    } else {
+      console.log('Already at last section');
     }
   };
 
   const prevSection = () => {
+    console.log('=== PREVIOUS BUTTON CLICKED ===');
+    console.log('currentSection:', currentSection);
+    
     if (currentSection > 0) {
+      console.log('Moving to section:', currentSection - 1);
       setCurrentSection(currentSection - 1);
+      console.log('Navigation successful');
+    } else {
+      console.log('Already at first section');
     }
   };
 
@@ -552,6 +715,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
           <div className="flex justify-between items-center">
             <h2 className="text-2xl font-bold">Vendor Registration Form</h2>
             <button
+              type="button"
               onClick={onClose}
               className="text-white hover:text-gray-200 transition-colors"
             >
@@ -587,6 +751,7 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
               return (
                 <button
                   key={section.id}
+                  type="button"
                   onClick={() => setCurrentSection(index)}
                   className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                     index === currentSection
@@ -601,62 +766,70 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit, formData, on
                 </button>
               );
             })}
+            </div>
           </div>
-        </div>
 
         {/* Form Content */}
         <div className="p-6 overflow-y-auto max-h-[50vh]">
-          <div className="mb-6">
+              <div className="mb-6">
             <h3 className="text-xl font-semibold text-gray-800 mb-2">
-              {sections[currentSection].title}
+              {sections[currentSection]?.title || 'Loading...'}
             </h3>
             <p className="text-gray-600">
               Please fill in the required information for this section.
-            </p>
-          </div>
-          {renderCurrentSection()}
+                </p>
+              </div>
+              {renderCurrentSection()}
         </div>
 
         {/* Footer */}
         <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
-          <button
+                <button
+            type="button"
             onClick={prevSection}
-            disabled={currentSection === 0}
+                  disabled={currentSection === 0}
             className="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            Previous
-          </button>
+                >
+                  Previous
+                </button>
           <div className="flex space-x-3">
-            <button
-              onClick={onClose}
+                  <button
+              type="button"
+                    onClick={onClose}
               className="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              Cancel
-            </button>
-            {currentSection === sections.length - 1 ? (
-              <button
-                onClick={onSubmit}
+                  >
+                    Cancel
+                  </button>
+                  {currentSection === sections.length - 1 ? (
+                    <button
+                type="button"
+                      onClick={() => {
+                        console.log('Submitting form data:', formData);
+                        console.log('Phone number value:', formData.phoneNumber);
+                        onSubmit(formData);
+                      }}
                 className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all duration-200 font-medium"
-              >
-                Submit Registration
-              </button>
-            ) : (
-              <button
-                onClick={nextSection}
+                    >
+                      Submit Registration
+                    </button>
+                  ) : (
+                    <button
+                type="button"
+                      onClick={nextSection}
                 className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all duration-200 font-medium"
-              >
-                Next
-              </button>
-            )}
+                    >
+                      Next
+                    </button>
+                  )}
           </div>
         </div>
       </div>
-
+      
       {/* Terms and Conditions Modal */}
       {showTermsModal && (
         <TermsAndConditions onClose={() => setShowTermsModal(false)} />
       )}
-
+      
       {/* Privacy Policy Modal */}
       {showPrivacyModal && (
         <PrivacyPolicy onClose={() => setShowPrivacyModal(false)} />

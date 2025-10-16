@@ -36,6 +36,28 @@ const ProjectsView = ({ showNotification }) => {
     loadData();
   }, []);
 
+  // Listen for real-time database changes
+  useEffect(() => {
+    const handleDatabaseChange = (event) => {
+      const change = event.detail;
+      console.log('ProjectsView received database change:', change);
+      
+      // Reload data when there are changes to projects
+      if (change.table === 'projects') {
+        console.log('🔄 Refreshing projects data due to database change');
+        loadData();
+      }
+    };
+
+    // Add event listener for database changes
+    window.addEventListener('databaseChange', handleDatabaseChange);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('databaseChange', handleDatabaseChange);
+    };
+  }, []);
+
   const handleSalaryCodeChange = (salaryCode) => {
     if (salaryCode && employees.length > 0) {
       const employee = employees.find(emp => emp.employeeId === salaryCode);
@@ -67,19 +89,28 @@ const ProjectsView = ({ showNotification }) => {
   const loadData = async () => {
     try {
       setLoading(true);
+      console.log('🔄 Loading projects data...');
+      
       const [projectsData, employeesData, vendorsData, updatesData] = await Promise.all([
         apiCall('/api/admin/projects'),
         apiCall('/api/admin/employees'),
         apiCall('/api/admin/vendors'),
-        apiCall('/api/admin/project-updates')
+        apiCall('/api/admin/project-updates').catch(err => {
+          console.log('⚠️ Project updates API not available, using empty array');
+          return [];
+        })
       ]);
+      
+      console.log('📊 Projects data received:', projectsData);
+      console.log('👥 Employees data received:', employeesData);
+      console.log('🏢 Vendors data received:', vendorsData);
       
       setProjects(projectsData);
       setEmployees(employeesData);
       setVendors(vendorsData);
       setProjectUpdates(updatesData || []);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('❌ Error loading data:', error);
       showNotification('Failed to load data', 'error');
     } finally {
       setLoading(false);
@@ -191,7 +222,7 @@ const ProjectsView = ({ showNotification }) => {
   const filteredProjects = (projects || []).filter(project => {
     const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (project.description && project.description.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchesStatus = statusFilter === 'all' || project.status === statusFilter;
+    const matchesStatus = statusFilter === 'all' || project.status?.toLowerCase() === statusFilter.toLowerCase();
     const matchesPriority = priorityFilter === 'all' || project.priority === priorityFilter;
     const matchesAssigned = assignedToFilter === 'all' || 
                           (assignedToFilter === 'assigned' && project.assigned_to_id) ||
@@ -295,7 +326,7 @@ const ProjectsView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Planning</p>
-              <p className="text-2xl font-bold text-gray-900">{(projects || []).filter(p => p.status === 'planning').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(projects || []).filter(p => p.status?.toLowerCase() === 'planning').length}</p>
             </div>
             <Calendar className="h-8 w-8 text-purple-500" />
           </div>
@@ -305,7 +336,7 @@ const ProjectsView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">In Progress</p>
-              <p className="text-2xl font-bold text-gray-900">{(projects || []).filter(p => p.status === 'in_progress').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(projects || []).filter(p => p.status?.toLowerCase() === 'in_progress').length}</p>
             </div>
             <ArrowRight className="h-8 w-8 text-blue-500" />
           </div>
@@ -315,7 +346,7 @@ const ProjectsView = ({ showNotification }) => {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600">Completed</p>
-              <p className="text-2xl font-bold text-gray-900">{(projects || []).filter(p => p.status === 'completed').length}</p>
+              <p className="text-2xl font-bold text-gray-900">{(projects || []).filter(p => p.status?.toLowerCase() === 'completed').length}</p>
             </div>
             <Briefcase className="h-8 w-8 text-green-500" />
           </div>
