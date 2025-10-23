@@ -181,6 +181,29 @@ CREATE TABLE IF NOT EXISTS attendance (
     UNIQUE KEY unique_user_date (user_id, date)
 );
 
+-- Create lead_generation_reports table
+CREATE TABLE IF NOT EXISTS lead_generation_reports (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    company_name VARCHAR(255) NOT NULL,
+    project_name VARCHAR(255),
+    key_account_manager VARCHAR(255),
+    project_coordinator VARCHAR(255),
+    client_end_manager VARCHAR(255),
+    client_email VARCHAR(255),
+    location VARCHAR(255),
+    start_date VARCHAR(100),
+    expected_project_start_date VARCHAR(100),
+    last_interacted_date VARCHAR(100),
+    lead_status VARCHAR(100),
+    lead_source VARCHAR(100),
+    remarks TEXT,
+    uploaded_by INT NOT NULL,
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Insert default admin user (password: admin123)
 INSERT INTO admins (email, username, full_name, password_hash) VALUES 
 ('admin@yellowstonegroup.com', 'admin', 'System Administrator', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4JdGz8K8K2')
@@ -206,3 +229,5 @@ CREATE INDEX idx_tasks_assigned_to ON tasks(assigned_to);
 CREATE INDEX idx_tasks_status ON tasks(status);
 CREATE INDEX idx_tickets_status ON tickets(status);
 CREATE INDEX idx_attendance_user_date ON attendance(user_id, date);
+CREATE INDEX idx_lead_generation_reports_uploaded_by ON lead_generation_reports(uploaded_by);
+CREATE INDEX idx_lead_generation_reports_company ON lead_generation_reports(company_name);

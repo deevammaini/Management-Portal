@@ -2,10 +2,16 @@ const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 export const apiCall = async (endpoint, options = {}) => {
   try {
+    // Don't set Content-Type for FormData - let browser set it with boundary
+    const headers = {};
+    if (!(options.body instanceof FormData)) {
+      headers['Content-Type'] = 'application/json';
+    }
+    
     const response = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        ...headers,
         ...options.headers,
       },
       credentials: 'include',

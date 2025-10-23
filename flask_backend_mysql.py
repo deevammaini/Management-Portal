@@ -28,6 +28,9 @@ from io import BytesIO
 import zipfile
 import uuid
 import secrets
+import csv
+import pandas as pd
+from werkzeug.utils import secure_filename
 import json
 
 # Import configuration
@@ -149,6 +152,7 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
             return []
         return None
     
+    cursor = None
     try:
         cursor = connection.cursor(dictionary=True)
         cursor.execute(query, params)
@@ -165,18 +169,17 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
         connection.commit()
         return result
     except Error as e:
-        print(f"❌ MySQL query error: {e}")
+        print(f"MySQL query error: {e}")
         print(f"Query: {query}")
         print(f"Params: {params}")
         if fetch_all:
             return []
         return None
     finally:
-        try:
+        if cursor:
             cursor.close()
+        if connection:
             connection.close()
-        except:
-            pass
 
 def _generate_avatar(name):
     """Generate avatar initials from name"""
@@ -342,20 +345,20 @@ def get_vendors_data():
     try:
         table_check = execute_query("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'vendors') as exists", fetch_one=True)
         if not table_check or not table_check['exists']:
-            print("❌ Vendors table does not exist!")
+            print("Vendors table does not exist!")
             return []
         
         query = "SELECT * FROM vendors"
-        print(f"🔍 Executing vendors query: {query}")
+        print(f"Executing vendors query: {query}")
         vendors = execute_query(query, fetch_all=True)
-        print(f"🔍 Vendors query result: {vendors}")
+        print(f"Vendors query result: {vendors}")
         if vendors is None:
-            print("⚠️ Vendors query returned None")
+            print("Vendors query returned None")
             return []
-        print(f"✅ Vendors query returned {len(vendors) if vendors else 0} records")
+        print(f"Vendors query returned {len(vendors) if vendors else 0} records")
         return vendors
     except Exception as e:
-        print(f"❌ Error getting vendors: {e}")
+        print(f"Error getting vendors: {e}")
         return []
 
 def get_nda_requests_data():
@@ -363,20 +366,20 @@ def get_nda_requests_data():
     try:
         table_check = execute_query("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'nda_requests') as exists", fetch_one=True)
         if not table_check or not table_check['exists']:
-            print("❌ NDA requests table does not exist!")
+            print("NDA requests table does not exist!")
             return []
         
         query = "SELECT * FROM nda_requests"
-        print(f"🔍 Executing NDA requests query: {query}")
+        print(f"Executing NDA requests query: {query}")
         nda_requests = execute_query(query, fetch_all=True)
-        print(f"🔍 NDA requests query result: {nda_requests}")
+        print(f"NDA requests query result: {nda_requests}")
         if nda_requests is None:
-            print("⚠️ NDA requests query returned None")
+            print("NDA requests query returned None")
             return []
-        print(f"✅ NDA requests query returned {len(nda_requests) if nda_requests else 0} records")
+        print(f"NDA requests query returned {len(nda_requests) if nda_requests else 0} records")
         return nda_requests
     except Exception as e:
-        print(f"❌ Error getting NDA requests: {e}")
+        print(f"Error getting NDA requests: {e}")
         return []
 
 def get_notifications_data():
@@ -883,7 +886,7 @@ def admin_login():
 def test_send_nda():
     """Test endpoint for NDA sending functionality"""
     try:
-        print("🔍 Testing NDA send functionality...")
+        print("Testing NDA send functionality...")
         
         test_query = "SELECT COUNT(*) FROM vendors"
         result = execute_query(test_query, fetch_one=True)
@@ -892,7 +895,7 @@ def test_send_nda():
         
         print(f"✅ Database connection working - {result['count']} vendors found")
         
-        print(f"🔍 SMTP Configuration:")
+        print(f"SMTP Configuration:")
         print(f"  Server: {SMTP_SERVER}")
         print(f"  Port: {SMTP_PORT}")
         print(f"  Username: {SMTP_USERNAME}")
@@ -1991,7 +1994,7 @@ def get_vendor_profile():
         # Get basic vendor information
         vendor_query = """
         SELECT id, company_name, contact_person, email, phone, address, 
-               business_type, registration_number, country, state,
+               business_type, registration_number, country, state, 
                registration_status, nda_status, reference_number,
                portal_access, has_full_access, created_at, updated_at,
                signature_data, company_stamp_data, signature_type, signed_date,
@@ -3410,9 +3413,9 @@ def google_form_webhook():
         else:
             submission_timestamp = datetime.now()
         
-        print(f"🔍 Received Google Form submission for reference: {reference_number}")
-        print(f"🔍 Timestamp received: {timestamp_str}")
-        print(f"🔍 Parsed timestamp: {submission_timestamp}")
+        print(f"Received Google Form submission for reference: {reference_number}")
+        print(f"Timestamp received: {timestamp_str}")
+        print(f"Parsed timestamp: {submission_timestamp}")
         
         # Find existing vendor by reference number
         vendor_query = "SELECT id FROM vendors WHERE reference_number = %s"
@@ -3507,20 +3510,20 @@ def send_nda():
         email = data.get('email')
         company_name = data.get('company_name')
         
-        print(f"🔍 NDA Send Request: email={email}, company={company_name}")
+        print(f"NDA Send Request: email={email}, company={company_name}")
         
         if not email:
             print("❌ Email is required")
             return jsonify({'success': False, 'error': 'Email is required'}), 400
         
         reference_number = generate_reference_number()
-        print(f"🔍 Generated reference number: {reference_number}")
+        print(f"Generated reference number: {reference_number}")
         
         check_query = "SELECT id FROM vendors WHERE email = %s"
         existing_vendor = execute_query(check_query, (email,), fetch_one=True)
         
         if existing_vendor:
-            print(f"🔍 Updating existing vendor: {existing_vendor['id']}")
+            print(f"Updating existing vendor: {existing_vendor['id']}")
             query = """
             UPDATE vendors SET company_name = %s, reference_number = %s, updated_at = %s
             WHERE email = %s
@@ -3528,7 +3531,7 @@ def send_nda():
             result = execute_query(query, (company_name, reference_number, datetime.now(), email))
             print(f"✅ Vendor update query executed successfully")
         else:
-            print(f"🔍 Creating new vendor")
+            print(f"Creating new vendor")
             query = """
             INSERT INTO vendors (email, company_name, nda_status, reference_number, created_at)
             VALUES (%s, %s, %s, %s, %s)
@@ -3580,7 +3583,7 @@ Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India
             
             msg.attach(MIMEText(body, 'plain'))
             
-            print(f"🔍 Attempting to send email to {email}")
+            print(f"Attempting to send email to {email}")
             server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
             server.starttls()
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
@@ -4041,7 +4044,7 @@ def create_employee_ticket():
         connection.close()
         
         if ticket_id:
-            print(f"✅ Ticket created successfully: ID {ticket_id} by employee {employee_id}")
+            print(f"Ticket created successfully: ID {ticket_id} by employee {employee_id}")
             
             # Broadcast the change to admin dashboard
             broadcast_database_change('tickets', 'insert', {
@@ -4062,7 +4065,7 @@ def create_employee_ticket():
             return jsonify({'success': False, 'error': 'Failed to create ticket'}), 500
             
     except Exception as e:
-        print(f"❌ Error creating employee ticket: {e}")
+        print(f"Error creating employee ticket: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/employee/projects/<int:project_id>/update', methods=['POST', 'PUT'])
@@ -4202,6 +4205,368 @@ def upload_profile_picture():
     except Exception as e:
         print(f"❌ Upload profile picture error: {e}")
         return jsonify({'error': 'Failed to upload profile picture'}), 500
+
+@app.route('/api/employee/test-lead-upload', methods=['GET'])
+def test_lead_upload():
+    """Test endpoint to check if lead upload functionality is ready"""
+    try:
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        # Check if lead_generation_reports table exists
+        try:
+            test_query = "SELECT COUNT(*) as count FROM lead_generation_reports LIMIT 1"
+            result = execute_query(test_query)
+            table_exists = True
+        except Exception as e:
+            table_exists = False
+            table_error = str(e)
+        
+        # Check if pandas is available
+        try:
+            import pandas as pd
+            pandas_available = True
+        except ImportError:
+            pandas_available = False
+        
+        return jsonify({
+            'success': True,
+            'user_id': user_id,
+            'table_exists': table_exists,
+            'pandas_available': pandas_available,
+            'table_error': table_error if not table_exists else None
+        })
+        
+    except Exception as e:
+        return jsonify({'error': f'Test failed: {str(e)}'}), 500
+
+@app.route('/api/employee/upload-lead-report', methods=['POST'])
+def upload_lead_report():
+    """Upload lead report file and process it"""
+    try:
+        print(f"Upload request received. Files: {list(request.files.keys())}")
+        print(f"Form data: {list(request.form.keys())}")
+        
+        user_id = session.get('user_id')
+        if not user_id:
+            print("No user_id in session")
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        if 'file' not in request.files:
+            print("No 'file' key in request.files")
+            return jsonify({'error': 'No file provided'}), 400
+        
+        file = request.files['file']
+        print(f"File details: name='{file.filename}', content_type='{file.content_type}', size={len(file.read())}")
+        file.seek(0)  # Reset file pointer after reading
+        
+        if file.filename == '':
+            print("Empty filename")
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Check file extension
+        allowed_extensions = {'.csv', '.xlsx', '.xls'}
+        file_ext = '.' + file.filename.split('.')[-1].lower() if '.' in file.filename else ''
+        print(f"File extension: '{file_ext}'")
+        
+        if file_ext not in allowed_extensions:
+            print(f"Invalid file extension: {file_ext}")
+            return jsonify({'error': f'Invalid file type. Only CSV, XLS, and XLSX files are allowed. Got: {file_ext}'}), 400
+        
+        # Read the file based on extension
+        try:
+            print(f"Attempting to read file with pandas...")
+            import pandas as pd
+            print(f"Pandas imported successfully")
+            
+            if file_ext == '.csv':
+                print(f"Reading CSV file...")
+                df = pd.read_csv(file)
+            else:
+                print(f"Reading Excel file...")
+                df = pd.read_excel(file)
+            
+            print(f"File read successfully. Shape: {df.shape}")
+            print(f"Columns: {list(df.columns)}")
+            
+        except ImportError as e:
+            print(f"Pandas import error: {e}")
+            return jsonify({'error': 'Pandas library not available. Please install: pip install pandas openpyxl'}), 400
+        except Exception as e:
+            print(f"File reading error: {e}")
+            return jsonify({'error': f'Error reading file: {str(e)}'}), 400
+        
+        # Expected columns
+        expected_columns = [
+            'Company Name', 'Project Name', 'Key Account Manager', 
+            'Project Coordinator', 'Client End Manager', 'Client Email',
+            'Location', 'Start Date', 'Expected Project Start Date',
+            'Last Interacted Date', 'Lead Status', 'Lead Source', 'Remarks'
+        ]
+        
+        # Check if all required columns are present
+        print(f"Checking columns...")
+        print(f"Expected: {expected_columns}")
+        print(f"Found: {list(df.columns)}")
+        
+        missing_columns = [col for col in expected_columns if col not in df.columns]
+        if missing_columns:
+            print(f"Missing columns: {missing_columns}")
+            return jsonify({
+                'error': f'Missing required columns: {", ".join(missing_columns)}',
+                'expected_columns': expected_columns,
+                'found_columns': list(df.columns),
+                'missing_columns': missing_columns
+            }), 400
+        
+        print(f"All required columns present")
+        
+        # Process each row
+        processed_count = 0
+        errors = []
+        
+        for index, row in df.iterrows():
+            try:
+                # Prepare data for insertion
+                lead_data = {
+                    'company_name': str(row['Company Name']).strip() if pd.notna(row['Company Name']) else '',
+                    'project_name': str(row['Project Name']).strip() if pd.notna(row['Project Name']) else '',
+                    'key_account_manager': str(row['Key Account Manager']).strip() if pd.notna(row['Key Account Manager']) else '',
+                    'project_coordinator': str(row['Project Coordinator']).strip() if pd.notna(row['Project Coordinator']) else '',
+                    'client_end_manager': str(row['Client End Manager']).strip() if pd.notna(row['Client End Manager']) else '',
+                    'client_email': str(row['Client Email']).strip() if pd.notna(row['Client Email']) else '',
+                    'location': str(row['Location']).strip() if pd.notna(row['Location']) else '',
+                    'start_date': str(row['Start Date']).strip() if pd.notna(row['Start Date']) else '',
+                    'expected_project_start_date': str(row['Expected Project Start Date']).strip() if pd.notna(row['Expected Project Start Date']) else '',
+                    'last_interacted_date': str(row['Last Interacted Date']).strip() if pd.notna(row['Last Interacted Date']) else '',
+                    'lead_status': str(row['Lead Status']).strip() if pd.notna(row['Lead Status']) else '',
+                    'lead_source': str(row['Lead Source']).strip() if pd.notna(row['Lead Source']) else '',
+                    'remarks': str(row['Remarks']).strip() if pd.notna(row['Remarks']) else '',
+                    'uploaded_by': user_id,
+                    'uploaded_at': datetime.now()
+                }
+                
+                # Insert into database
+                insert_query = """
+                INSERT INTO lead_generation_reports 
+                (company_name, project_name, key_account_manager, project_coordinator, 
+                 client_end_manager, client_email, location, start_date, expected_project_start_date,
+                 last_interacted_date, lead_status, lead_source, remarks, uploaded_by, uploaded_at)
+                VALUES (%(company_name)s, %(project_name)s, %(key_account_manager)s, %(project_coordinator)s,
+                        %(client_end_manager)s, %(client_email)s, %(location)s, %(start_date)s, %(expected_project_start_date)s,
+                        %(last_interacted_date)s, %(lead_status)s, %(lead_source)s, %(remarks)s, %(uploaded_by)s, %(uploaded_at)s)
+                """
+                
+                print(f"Inserting row {index + 1}: {lead_data['company_name']}")
+                execute_query(insert_query, lead_data)
+                processed_count += 1
+                print(f"Row {index + 1} inserted successfully")
+                
+            except Exception as e:
+                print(f"Error inserting row {index + 1}: {str(e)}")
+                errors.append(f"Row {index + 1}: {str(e)}")
+        
+        print(f"Upload completed. Processed: {processed_count}/{len(df)} rows")
+        return jsonify({
+            'success': True,
+            'message': f'Successfully processed {processed_count} leads',
+            'processed_count': processed_count,
+            'total_rows': len(df),
+            'errors': errors[:10] if errors else []  # Limit errors to first 10
+        })
+        
+    except Exception as e:
+        print(f"Upload lead report error: {e}")
+        return jsonify({'error': 'Failed to upload lead report'}), 500
+
+@app.route('/api/employee/uploaded-reports', methods=['GET', 'OPTIONS'])
+def get_uploaded_reports():
+    """Get all uploaded reports for the current user"""
+    print(f"Uploaded reports request: {request.method} - {request.url}")
+    
+    if request.method == 'OPTIONS':
+        print("Handling OPTIONS request")
+        return '', 200
+    
+    try:
+        # Get current user ID
+        current_user_id = session.get('user_id')
+        print(f"Current user_id: {current_user_id}")
+        
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        search = request.args.get('search', '', type=str)
+        
+        print(f"Loading uploaded reports for user {current_user_id}, search: '{search}', page: {page}")
+        
+        # Build query to get uploaded reports with lead counts
+        base_query = """
+        SELECT ur.*, u.name as uploaded_by_name,
+               COUNT(lr.id) as total_leads,
+               COUNT(*) OVER() as total_count
+        FROM uploaded_reports ur
+        LEFT JOIN users u ON ur.uploaded_by = u.id
+        LEFT JOIN lead_generation_reports lr ON ur.id = lr.report_id
+        WHERE ur.status = 'active'
+        """
+        
+        params = []
+        
+        # Add search filter
+        if search:
+            search_filter = """
+            AND (ur.report_name LIKE %s OR ur.original_filename LIKE %s OR ur.description LIKE %s)
+            """
+            base_query += search_filter
+            search_param = f"%{search}%"
+            params.extend([search_param, search_param, search_param])
+        
+        # Add grouping and ordering
+        base_query += """
+        GROUP BY ur.id
+        ORDER BY ur.uploaded_at DESC LIMIT %s OFFSET %s
+        """
+        offset = (page - 1) * per_page
+        params.extend([per_page, offset])
+        
+        print(f"Query: {base_query}")
+        print(f"Params: {params}")
+        
+        # Execute query
+        try:
+            reports = execute_query(base_query, params, fetch_all=True)
+            print(f"Query executed successfully, got {len(reports) if reports else 0} results")
+            
+            # Extract total count from first row if available
+            total = reports[0]['total_count'] if reports and len(reports) > 0 else 0
+            
+        except Exception as e:
+            print(f"Error executing query: {e}")
+            return jsonify({'error': f'Database error: {str(e)}'}), 500
+        
+        response_data = {
+            'success': True,
+            'reports': reports or [],
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total,
+                'pages': (total + per_page - 1) // per_page
+            }
+        }
+        
+        print(f"Returning response with {len(reports or [])} reports")
+        return jsonify(response_data)
+        
+    except Exception as e:
+        print(f"Get uploaded reports error: {e}")
+        return jsonify({'error': 'Failed to fetch uploaded reports'}), 500
+
+@app.route('/api/employee/lead-reports', methods=['GET', 'OPTIONS'])
+def get_lead_reports():
+    """Get all lead reports for the current user"""
+    print(f"Lead reports request: {request.method} - {request.url}")
+    
+    if request.method == 'OPTIONS':
+        print("Handling OPTIONS request")
+        return '', 200
+    
+    try:
+        # Get current user ID
+        current_user_id = session.get('user_id')
+        print(f"Current user_id: {current_user_id}")
+        
+        # Get query parameters
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        search = request.args.get('search', '', type=str)
+        
+        print(f"Loading reports for user {current_user_id}, search: '{search}', page: {page}")
+        
+        # Build query - show all reports if current user has no reports, otherwise show user's reports
+        base_query = """
+        SELECT lr.*, u.name as uploaded_by_name,
+               COUNT(*) OVER() as total_count
+        FROM lead_generation_reports lr
+        LEFT JOIN users u ON lr.uploaded_by = u.id
+        WHERE 1=1
+        """
+        
+        params = []
+        
+        # Add search filter
+        if search:
+            search_filter = """
+            AND (lr.company_name LIKE %s OR lr.project_name LIKE %s OR 
+                 lr.key_account_manager LIKE %s OR lr.client_email LIKE %s)
+            """
+            base_query += search_filter
+            search_param = f"%{search}%"
+            params.extend([search_param, search_param, search_param, search_param])
+        
+        # Add ordering and pagination
+        base_query += " ORDER BY lr.uploaded_at DESC LIMIT %s OFFSET %s"
+        offset = (page - 1) * per_page
+        params.extend([per_page, offset])
+        
+        print(f"Single query: {base_query}")
+        print(f"Params: {params}")
+        
+        # Execute single query
+        try:
+            reports = execute_query(base_query, params, fetch_all=True)
+            print(f"Query executed successfully, got {len(reports) if reports else 0} results")
+            
+            # Extract total count from first row if available
+            total = reports[0]['total_count'] if reports and len(reports) > 0 else 0
+            
+        except Exception as e:
+            print(f"Error executing query: {e}")
+            return jsonify({'error': f'Database error: {str(e)}'}), 500
+        
+        response_data = {
+            'success': True,
+            'reports': reports or [],
+            'pagination': {
+                'page': page,
+                'per_page': per_page,
+                'total': total,
+                'pages': (total + per_page - 1) // per_page
+            }
+        }
+        
+        print(f"Returning response with {len(reports or [])} reports")
+        return jsonify(response_data)
+        
+    except Exception as e:
+        print(f"Get lead reports error: {e}")
+        return jsonify({'error': 'Failed to fetch lead reports'}), 500
+
+@app.route('/api/test-table-exists', methods=['GET'])
+def test_table_exists():
+    """Test if lead_generation_reports table exists"""
+    try:
+        test_query = "SELECT COUNT(*) as count FROM lead_generation_reports LIMIT 1"
+        result = execute_query(test_query, fetch_one=True)
+        if result:
+            return jsonify({
+                'success': True, 
+                'table_exists': True, 
+                'count': result['count']
+            })
+        else:
+            return jsonify({
+                'success': True, 
+                'table_exists': False
+            })
+    except Exception as e:
+        return jsonify({
+            'success': False, 
+            'error': str(e),
+            'table_exists': False
+        })
 
 @app.route('/api/employee/remove-profile-picture', methods=['POST'])
 def remove_profile_picture():

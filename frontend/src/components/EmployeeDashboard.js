@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   CheckSquare, Briefcase, Ticket, Bell, Calendar, Clock, 
   AlertCircle, ArrowRight, User, Settings, LogOut, Home,
@@ -80,6 +80,18 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   const [leadGenSubTab, setLeadGenSubTab] = useState('leads');
   const [searchTerm, setSearchTerm] = useState('');
   const [leadGenExpanded, setLeadGenExpanded] = useState(false);
+  const fileInputRef = useRef(null);
+  const [uploadedReports, setUploadedReports] = useState([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportsSearch, setReportsSearch] = useState('');
+  const [reportsPagination, setReportsPagination] = useState({
+    page: 1,
+    per_page: 10,
+    total: 0,
+    pages: 0
+  });
+  const [selectedReport, setSelectedReport] = useState(null);
+  const [showReportModal, setShowReportModal] = useState(false);
 
   // Holiday data
   const holidays = [
@@ -104,6 +116,13 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       setLeadGenExpanded(true);
     }
   }, [activeTab]);
+
+  // Load reports when reports tab is active
+  useEffect(() => {
+    if (activeTab === 'leadgeneration' && leadGenSubTab === 'reports') {
+      loadUploadedReports();
+    }
+  }, [activeTab, leadGenSubTab]);
 
   // Real-time total hours calculation while clocked in
   useEffect(() => {
@@ -537,6 +556,236 @@ const EmployeeDashboard = ({ user, onLogout }) => {
         ];
       default:
         return [];
+    }
+  };
+
+  const downloadReportTemplate = () => {
+    // Create CSV content with the required fields
+    const headers = [
+      'Company Name',
+      'Project Name', 
+      'Key Account Manager',
+      'Project Coordinator',
+      'Client End Manager',
+      'Client Email',
+      'Location',
+      'Start Date',
+      'Expected Project Start Date',
+      'Last Interacted Date',
+      'Lead Status',
+      'Lead Source',
+      'Remarks'
+    ];
+    
+    // Create CSV content
+    const csvContent = headers.join(',') + '\n';
+    
+    // Create and download the file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'Lead_Report_Template.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showNotification('Template downloaded successfully!', 'success');
+  };
+
+  const testBackendStatus = async () => {
+    try {
+      showNotification('Testing backend status...', 'success');
+      
+      const response = await apiCall('/api/employee/test-lead-upload');
+      
+      console.log('Backend test response:', response);
+      
+      if (response.success) {
+        let message = 'Backend Status: ';
+        message += response.table_exists ? '✅ Table exists, ' : '❌ Table missing, ';
+        message += response.pandas_available ? '✅ Pandas available' : '❌ Pandas missing';
+        
+        if (!response.table_exists && response.table_error) {
+          message += `\nTable Error: ${response.table_error}`;
+        }
+        
+        showNotification(message, response.table_exists && response.pandas_available ? 'success' : 'error');
+      } else {
+        showNotification(`Backend test failed: ${response.error}`, 'error');
+      }
+    } catch (error) {
+      console.error('Backend test error:', error);
+      showNotification(`Backend test failed: ${error.message}`, 'error');
+    }
+  };
+
+  // Button handlers for reports
+  const handleViewReport = (report) => {
+    setSelectedReport(report);
+    setShowReportModal(true);
+  };
+
+  const handleEditReport = (report) => {
+    // For now, just show the report details
+    setSelectedReport(report);
+    setShowReportModal(true);
+  };
+
+  const handleDeleteReport = async (reportId) => {
+    if (window.confirm('Are you sure you want to delete this report and all its leads?')) {
+      try {
+        const response = await apiCall(`/api/employee/uploaded-reports/${reportId}`, {
+          method: 'DELETE'
+        });
+        
+        if (response.success) {
+          showNotification('Report deleted successfully', 'success');
+          loadUploadedReports(reportsPagination.page);
+        } else {
+          showNotification('Failed to delete report', 'error');
+        }
+      } catch (error) {
+        console.error('Error deleting report:', error);
+        showNotification('Failed to delete report', 'error');
+      }
+    }
+  };
+
+  const handlePageChange = (newPage) => {
+    loadUploadedReports(newPage);
+  };
+
+  const loadUploadedReports = async (page = 1) => {
+    try {
+      setReportsLoading(true);
+      console.log('Loading uploaded reports...');
+      console.log('Search term:', reportsSearch);
+      console.log('Page parameter:', page);
+      console.log('Page type:', typeof page);
+      
+      // Ensure page is a number
+      const pageNum = typeof page === 'number' ? page : parseInt(page) || 1;
+      console.log('Page number to use:', pageNum);
+      
+      const url = `/api/employee/uploaded-reports?search=${encodeURIComponent(reportsSearch)}&page=${pageNum}&per_page=10`;
+      console.log('API URL:', url);
+      
+      const response = await apiCall(url);
+      console.log('API Response:', response);
+      
+      if (response.success) {
+        setUploadedReports(response.reports);
+        setReportsPagination(response.pagination);
+        console.log('Reports loaded successfully:', response.reports);
+        console.log('Pagination:', response.pagination);
+      } else {
+        console.error('Failed to load reports:', response.error);
+        showNotification('Failed to load reports', 'error');
+      }
+    } catch (error) {
+      console.error('Error loading reports:', error);
+      showNotification('Failed to load reports', 'error');
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  const handleFileUpload = async (file) => {
+    console.log('handleFileUpload called with:', file);
+    if (!file) {
+      console.log('No file provided');
+      return;
+    }
+
+    // Validate file type
+    const allowedTypes = [
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv'
+    ];
+    
+    if (!allowedTypes.includes(file.type) && !file.name.match(/\.(xlsx?|csv)$/i)) {
+      showNotification('Please upload a valid Excel or CSV file', 'error');
+      return;
+    }
+
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      showNotification('File size must be less than 10MB', 'error');
+      return;
+    }
+
+    try {
+      showNotification('Uploading file...', 'success');
+      
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('employee_id', user.id);
+
+      console.log('FormData created:', formData);
+      console.log('FormData entries:');
+      for (let [key, value] of formData.entries()) {
+        console.log(key, value);
+      }
+
+      console.log('Uploading file:', file.name, 'Size:', file.size, 'Type:', file.type);
+
+      const response = await apiCall('/api/employee/upload-lead-report', {
+        method: 'POST',
+        body: formData
+      });
+
+      console.log('Upload response:', response);
+
+      if (response.success) {
+        showNotification(`Report uploaded successfully! Processed ${response.processed_count || 0} leads.`, 'success');
+        // Reset file input
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+      } else {
+        console.error('Upload failed:', response);
+        showNotification(response.error || response.message || 'Failed to upload report', 'error');
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      showNotification(`Failed to upload report: ${error.message}`, 'error');
+    }
+  };
+
+  // Drag and drop handlers
+  const handleDragOver = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragEnter = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDragLeave = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      handleFileUpload(files[0]);
+    }
+  };
+
+  const handleFileInputChange = (event) => {
+    const file = event.target.files[0];
+    console.log('File input changed:', file);
+    if (file) {
+      handleFileUpload(file);
     }
   };
 
@@ -1545,17 +1794,201 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                   <div className="p-6">
                     <div className="flex items-center justify-between mb-6">
                       <h3 className="text-lg font-semibold">Lead Reports</h3>
-                      <button className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2">
-                        <Download size={18} />
-                        Export Reports
-                      </button>
+                      <div className="flex items-center gap-3">
+                        <div className="relative">
+                          <Search className="h-4 w-4 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
+                          <input
+                            type="text"
+                            placeholder="Search reports..."
+                            value={reportsSearch}
+                            onChange={(e) => setReportsSearch(e.target.value)}
+                            onKeyPress={(e) => e.key === 'Enter' && loadUploadedReports()}
+                            className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          />
+                        </div>
+                        <button 
+                          onClick={loadUploadedReports}
+                          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2"
+                        >
+                          <RefreshCw size={18} />
+                          Refresh
+                        </button>
+                        <button className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 flex items-center gap-2">
+                          <Download size={18} />
+                          Export Reports
+                        </button>
+                      </div>
                     </div>
                     
-                    <div className="bg-gray-50 rounded-lg p-8 text-center">
-                      <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <h4 className="text-lg font-medium text-gray-900 mb-2">No Reports Available</h4>
-                      <p className="text-gray-500">Reports will appear here once leads are added</p>
-                    </div>
+                    {reportsLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                        <span className="ml-3 text-gray-600">Loading reports...</span>
+                      </div>
+                    ) : uploadedReports.length === 0 ? (
+                      <div className="bg-gray-50 rounded-lg p-8 text-center">
+                        <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                        <h4 className="text-lg font-medium text-gray-900 mb-2">No Reports Available</h4>
+                        <p className="text-gray-500">Upload your first report using the "Upload Report" tab</p>
+                      </div>
+                    ) : (
+                      <div className="bg-white rounded-lg border p-6">
+                        <div className="mb-4">
+                          <h4 className="text-lg font-medium text-gray-900 mb-2">
+                            Uploaded Reports ({reportsPagination.total || uploadedReports.length} total)
+                          </h4>
+                          <p className="text-sm text-gray-600">
+                            Click on any report to view details and manage leads
+                          </p>
+                        </div>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                          {uploadedReports.map((report) => (
+                            <div key={report.id} className="relative group">
+                              <button
+                                onClick={() => handleViewReport(report)}
+                                className="w-full p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md hover:border-blue-300 transition-all duration-200 text-left group-hover:bg-blue-50"
+                              >
+                                <div className="flex items-start justify-between mb-2">
+                                  <h5 className="font-medium text-gray-900 text-sm leading-tight">
+                                    {report.report_name}
+                                  </h5>
+                                  <span className="ml-2 px-2 py-1 text-xs font-semibold rounded-full flex-shrink-0 bg-blue-100 text-blue-800">
+                                    {report.file_type.toUpperCase()}
+                                  </span>
+                                </div>
+                                
+                                <p className="text-xs text-gray-600 mb-1">
+                                  <strong>File:</strong> {report.original_filename}
+                                </p>
+                                
+                                <p className="text-xs text-gray-600 mb-1">
+                                  <strong>Leads:</strong> {report.total_leads || 0} entries
+                                </p>
+                                
+                                <p className="text-xs text-gray-600 mb-1">
+                                  <strong>Size:</strong> {(report.file_size / 1024).toFixed(1)} KB
+                                </p>
+                                
+                                <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
+                                  <span className="text-xs text-gray-500">
+                                    {new Date(report.uploaded_at).toLocaleDateString()}
+                                  </span>
+                                  <div className="flex items-center gap-1">
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleEditReport(report);
+                                      }}
+                                      className="text-green-600 hover:text-green-800 p-1"
+                                      title="Edit Report"
+                                    >
+                                      <Edit size={14} />
+                                    </button>
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDeleteReport(report.id);
+                                      }}
+                                      className="text-red-600 hover:text-red-800 p-1"
+                                      title="Delete Report"
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                        
+                        {/* Pagination Controls */}
+                        {reportsPagination.pages > 1 && (
+                          <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+                            <div className="flex-1 flex justify-between sm:hidden">
+                              <button
+                                onClick={() => handlePageChange((reportsPagination.page || 1) - 1)}
+                                disabled={!reportsPagination.page || reportsPagination.page <= 1}
+                                className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Previous
+                              </button>
+                              <button
+                                onClick={() => handlePageChange((reportsPagination.page || 1) + 1)}
+                                disabled={!reportsPagination.page || !reportsPagination.pages || reportsPagination.page >= reportsPagination.pages}
+                                className="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Next
+                              </button>
+                            </div>
+                            <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                              <div>
+                                <p className="text-sm text-gray-700">
+                                  Showing{' '}
+                                  <span className="font-medium">
+                                    {((reportsPagination.page || 1) - 1) * (reportsPagination.per_page || 10) + 1}
+                                  </span>{' '}
+                                  to{' '}
+                                  <span className="font-medium">
+                                    {Math.min((reportsPagination.page || 1) * (reportsPagination.per_page || 10), reportsPagination.total || 0)}
+                                  </span>{' '}
+                                  of{' '}
+                                  <span className="font-medium">{reportsPagination.total || 0}</span>{' '}
+                                  results
+                                </p>
+                              </div>
+                              <div>
+                                <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                                  <button
+                                    onClick={() => handlePageChange(reportsPagination.page - 1)}
+                                    disabled={!reportsPagination.page || reportsPagination.page <= 1}
+                                    className="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    <span className="sr-only">Previous</span>
+                                    <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                      <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  </button>
+                                  
+                                  {/* Page numbers */}
+                                  {Array.from({ length: Math.min(5, reportsPagination.pages || 1) }, (_, i) => {
+                                    const currentPage = reportsPagination.page || 1;
+                                    const totalPages = reportsPagination.pages || 1;
+                                    const pageNum = Math.max(1, currentPage - 2) + i;
+                                    if (pageNum > totalPages) return null;
+                                    
+                                    return (
+                                      <button
+                                        key={pageNum}
+                                        onClick={() => handlePageChange(pageNum)}
+                                        className={`relative inline-flex items-center px-4 py-2 border text-sm font-medium ${
+                                          pageNum === currentPage
+                                            ? 'z-10 bg-blue-50 border-blue-500 text-blue-600'
+                                            : 'bg-white border-gray-300 text-gray-500 hover:bg-gray-50'
+                                        }`}
+                                      >
+                                        {pageNum}
+                                      </button>
+                                    );
+                                  })}
+                                  
+                                  <button
+                                    onClick={() => handlePageChange((reportsPagination.page || 1) + 1)}
+                                    disabled={!reportsPagination.page || !reportsPagination.pages || reportsPagination.page >= reportsPagination.pages}
+                                    className="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                  >
+                                    <span className="sr-only">Next</span>
+                                    <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                      <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                                    </svg>
+                                  </button>
+                                </nav>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1564,14 +1997,69 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                   <div className="p-6">
                     <h3 className="text-lg font-semibold mb-6">Upload Report</h3>
                     
-                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-amber-400 transition-colors">
-                      <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <h4 className="text-lg font-medium text-gray-900 mb-2">Upload Your Report</h4>
-                      <p className="text-gray-500 mb-4">Drag and drop your file here, or click to browse</p>
-                      <button className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600">
-                        Choose File
-                      </button>
-                      <p className="text-xs text-gray-400 mt-4">Supported formats: PDF, DOC, DOCX, XLS, XLSX</p>
+                    {/* Download Template Section */}
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Download className="h-6 w-6 text-blue-600" />
+                        <h4 className="text-lg font-medium text-blue-900">Step 1: Download Template</h4>
+                      </div>
+                      <p className="text-blue-700 mb-4">
+                        Download the standard report format template to ensure your data is uploaded correctly.
+                      </p>
+                      <div className="flex gap-3">
+                        <button 
+                          onClick={downloadReportTemplate}
+                          className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2"
+                        >
+                          <Download size={18} />
+                          Download Report Template
+                        </button>
+                        <button 
+                          onClick={testBackendStatus}
+                          className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 flex items-center gap-2"
+                        >
+                          <Database size={18} />
+                          Test Backend Status
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Upload Section */}
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <Upload className="h-6 w-6 text-gray-600" />
+                        <h4 className="text-lg font-medium text-gray-900">Step 2: Upload Your Report</h4>
+                      </div>
+                      <p className="text-gray-600 mb-4">
+                        Fill the downloaded template with your lead data and upload it here.
+                      </p>
+                      
+                      <div 
+                        className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-amber-400 transition-colors"
+                        onDrop={handleDrop}
+                        onDragOver={handleDragOver}
+                        onDragEnter={handleDragEnter}
+                        onDragLeave={handleDragLeave}
+                      >
+                        <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                        <h5 className="text-lg font-medium text-gray-900 mb-2">Upload Your Report</h5>
+                        <p className="text-gray-500 mb-4">Drag and drop your file here, or click to browse</p>
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls,.csv"
+                          onChange={handleFileInputChange}
+                          className="hidden"
+                          id="report-upload"
+                          ref={fileInputRef}
+                        />
+                        <button
+                          onClick={() => fileInputRef.current?.click()}
+                          className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 cursor-pointer inline-block"
+                        >
+                          Choose File
+                        </button>
+                        <p className="text-xs text-gray-400 mt-4">Supported formats: XLS, XLSX, CSV</p>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -2200,6 +2688,84 @@ const EmployeeDashboard = ({ user, onLogout }) => {
               >
                 Save Changes
               </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Report Details Modal */}
+        {showReportModal && selectedReport && (
+          <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-1/2 shadow-lg rounded-md bg-white">
+              <div className="mt-3">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Report Details</h3>
+                  <button
+                    onClick={() => setShowReportModal(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+                
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Report Name</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReport.report_name}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Original Filename</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReport.original_filename}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">File Type</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReport.file_type.toUpperCase()}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">File Size</label>
+                      <p className="mt-1 text-sm text-gray-900">{(selectedReport.file_size / 1024).toFixed(1)} KB</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Total Leads</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReport.total_leads || 0} entries</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Uploaded By</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReport.uploaded_by_name || 'Unknown'}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Upload Date</label>
+                      <p className="mt-1 text-sm text-gray-900">{new Date(selectedReport.uploaded_at).toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Status</label>
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                        selectedReport.status === 'active' ? 'bg-green-100 text-green-800' :
+                        selectedReport.status === 'archived' ? 'bg-yellow-100 text-yellow-800' :
+                        'bg-gray-100 text-gray-800'
+                      }`}>
+                        {selectedReport.status || 'Unknown'}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  {selectedReport.description && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700">Description</label>
+                      <p className="mt-1 text-sm text-gray-900">{selectedReport.description}</p>
+                    </div>
+                  )}
+                </div>
+                
+                <div className="flex justify-end mt-6">
+                  <button
+                    onClick={() => setShowReportModal(false)}
+                    className="px-4 py-2 bg-gray-300 text-gray-700 rounded-md hover:bg-gray-400"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           </div>
