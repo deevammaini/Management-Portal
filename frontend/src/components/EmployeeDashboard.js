@@ -4,7 +4,8 @@ import {
   AlertCircle, ArrowRight, User, Settings, LogOut, Home,
   BarChart3, TrendingUp, FileText, Users, Plus, Filter,
   Eye, Edit, Trash2, Download, Upload, Search, Star,
-  CheckCircle2, XCircle, Clock3, AlertTriangle, Check, X, Menu
+  CheckCircle2, XCircle, Clock3, AlertTriangle, Check, X, Menu,
+  Target, Database, CheckCircle, RefreshCw, ChevronDown, ChevronRight
 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 
@@ -63,7 +64,6 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   const [upcomingDeadlines, setUpcomingDeadlines] = useState([]);
   const [showProfile, setShowProfile] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [profilePicture, setProfilePicture] = useState(null);
@@ -77,6 +77,9 @@ const EmployeeDashboard = ({ user, onLogout }) => {
     skills: '',
     bio: ''
   });
+  const [leadGenSubTab, setLeadGenSubTab] = useState('leads');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [leadGenExpanded, setLeadGenExpanded] = useState(false);
 
   // Holiday data
   const holidays = [
@@ -94,6 +97,13 @@ const EmployeeDashboard = ({ user, onLogout }) => {
     loadData();
     }
   }, [user?.id]);
+
+  // Auto-expand Lead Generation when active
+  useEffect(() => {
+    if (activeTab === 'leadgeneration') {
+      setLeadGenExpanded(true);
+    }
+  }, [activeTab]);
 
   // Real-time total hours calculation while clocked in
   useEffect(() => {
@@ -585,7 +595,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
         </div>
 
       {/* Navigation */}
-        <nav className="flex-1 p-4">
+        <nav className="flex-1 p-4 overflow-y-auto">
           <div className="space-y-2">
             {[
               { id: 'dashboard', label: 'Dashboard', icon: Home },
@@ -593,8 +603,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
               { id: 'attendance', label: 'Attendance', icon: Clock },
               { id: 'tasks', label: 'Tasks', icon: CheckSquare },
               { id: 'projects', label: 'Projects', icon: Briefcase },
-              { id: 'tickets', label: 'Tickets', icon: Ticket },
-              { id: 'profile', label: 'Profile', icon: User }
+              { id: 'tickets', label: 'Tickets', icon: Ticket }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -612,6 +621,91 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                 {tab.label}
               </button>
             ))}
+
+            {/* Lead Generation - Expandable */}
+            <div className="space-y-1">
+              <button
+                onClick={() => setLeadGenExpanded(!leadGenExpanded)}
+                className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  activeTab === 'leadgeneration'
+                    ? 'bg-gradient-to-r from-amber-50 to-orange-50 text-amber-600'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Target size={20} />
+                  <span>Lead Generation</span>
+                </div>
+                {leadGenExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              </button>
+              
+              {/* Sub-menu items */}
+              {leadGenExpanded && (
+                <div className="ml-4 space-y-1 border-l-2 border-gray-200 pl-2">
+                  <button
+                    onClick={() => {
+                      setActiveTab('leadgeneration');
+                      setLeadGenSubTab('leads');
+                      setSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
+                      activeTab === 'leadgeneration' && leadGenSubTab === 'leads'
+                        ? 'bg-amber-50 text-amber-600 font-medium'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                  >
+                    <Database size={16} />
+                    Leads
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('leadgeneration');
+                      setLeadGenSubTab('reports');
+                      setSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
+                      activeTab === 'leadgeneration' && leadGenSubTab === 'reports'
+                        ? 'bg-amber-50 text-amber-600 font-medium'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                  >
+                    <BarChart3 size={16} />
+                    Reports
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('leadgeneration');
+                      setLeadGenSubTab('uploadreport');
+                      setSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
+                      activeTab === 'leadgeneration' && leadGenSubTab === 'uploadreport'
+                        ? 'bg-amber-50 text-amber-600 font-medium'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                  >
+                    <Upload size={16} />
+                    Upload Report
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Profile */}
+            <button
+              onClick={() => {
+                setActiveTab('profile');
+                setSidebarOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                activeTab === 'profile'
+                  ? 'bg-gradient-to-r from-amber-50 to-orange-50 text-amber-600 border-r-2 border-amber-500'
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              <User size={20} />
+              Profile
+            </button>
         </div>
       </nav>
 
@@ -669,9 +763,15 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                   <h2 className="text-2xl font-bold text-gray-900 capitalize">
                     {activeTab === 'dashboard' && 'Dashboard'}
                     {activeTab === 'announcements' && 'Announcements'}
+                    {activeTab === 'attendance' && 'Attendance'}
                     {activeTab === 'tasks' && 'My Tasks'}
                     {activeTab === 'projects' && 'My Projects'}
                     {activeTab === 'tickets' && 'My Tickets'}
+                    {activeTab === 'leadgeneration' && (
+                      leadGenSubTab === 'leads' ? 'Leads' :
+                      leadGenSubTab === 'reports' ? 'Lead Reports' :
+                      'Upload Report'
+                    )}
                     {activeTab === 'profile' && 'Profile'}
                   </h2>
                   <p className="text-gray-600">Welcome back, {user.name}!</p>
@@ -1416,6 +1516,68 @@ const EmployeeDashboard = ({ user, onLogout }) => {
             </div>
           </div>
         )}
+
+          {/* Lead Generation Tab */}
+          {activeTab === 'leadgeneration' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-xl shadow-sm border">
+                {/* Leads Sub-tab */}
+                {leadGenSubTab === 'leads' && (
+                  <div className="p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-semibold">All Leads</h3>
+                      <button className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 flex items-center gap-2">
+                        <Plus size={18} />
+                        Add New Lead
+                      </button>
+                    </div>
+                    
+                    <div className="bg-gray-50 rounded-lg p-8 text-center">
+                      <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h4 className="text-lg font-medium text-gray-900 mb-2">No Leads Yet</h4>
+                      <p className="text-gray-500">Start adding leads to track your sales pipeline</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reports Sub-tab */}
+                {leadGenSubTab === 'reports' && (
+                  <div className="p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-semibold">Lead Reports</h3>
+                      <button className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2">
+                        <Download size={18} />
+                        Export Reports
+                      </button>
+                    </div>
+                    
+                    <div className="bg-gray-50 rounded-lg p-8 text-center">
+                      <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h4 className="text-lg font-medium text-gray-900 mb-2">No Reports Available</h4>
+                      <p className="text-gray-500">Reports will appear here once leads are added</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Upload Report Sub-tab */}
+                {leadGenSubTab === 'uploadreport' && (
+                  <div className="p-6">
+                    <h3 className="text-lg font-semibold mb-6">Upload Report</h3>
+                    
+                    <div className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-amber-400 transition-colors">
+                      <Upload className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                      <h4 className="text-lg font-medium text-gray-900 mb-2">Upload Your Report</h4>
+                      <p className="text-gray-500 mb-4">Drag and drop your file here, or click to browse</p>
+                      <button className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600">
+                        Choose File
+                      </button>
+                      <p className="text-xs text-gray-400 mt-4">Supported formats: PDF, DOC, DOCX, XLS, XLSX</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Profile Tab */}
         {activeTab === 'profile' && (

@@ -22,19 +22,38 @@ const App = () => {
 
   const checkAuth = async () => {
     try {
+      // First check if user data exists in sessionStorage
+      const storedUser = sessionStorage.getItem('user');
+      if (storedUser) {
+        const userData = JSON.parse(storedUser);
+        console.log('Found stored user:', userData);
+        setUser(userData);
+        setLoading(false);
+        return;
+      }
+      
+      // If no stored user, check with API
       const response = await apiCall('/api/auth/current-user');
       if (response.success && response.user) {
+        console.log('API returned user:', response.user);
         setUser(response.user);
+        // Store user data in sessionStorage for persistence
+        sessionStorage.setItem('user', JSON.stringify(response.user));
       }
     } catch (error) {
-      console.log('Not authenticated');
+      console.log('Not authenticated:', error);
+      // Clear any invalid stored data
+      sessionStorage.removeItem('user');
     } finally {
       setLoading(false);
     }
   };
 
   const handleLogin = (userData) => {
+    console.log('User logged in:', userData);
     setUser(userData);
+    // Store user data in sessionStorage for persistence
+    sessionStorage.setItem('user', JSON.stringify(userData));
   };
 
   const handleLogout = async () => {
@@ -44,6 +63,8 @@ const App = () => {
       console.error('Logout error:', error);
     } finally {
       setUser(null);
+      // Clear user data from sessionStorage
+      sessionStorage.removeItem('user');
     }
   };
 
@@ -115,20 +136,21 @@ const AppRoutes = ({ user, onLogin, onLogout, showRegistration, setShowRegistrat
       return <Navigate to="/" replace />;
     }
     
-    // Check if vendor needs to complete registration
-    // If NDA is completed but registration is not approved, show vendor registration form
-    if (user.nda_status === 'completed' && user.registration_status !== 'approved') {
-      // Vendor has completed NDA but not registration - show vendor registration form
-      return <VendorRegistrationForm user={user} onLogout={onLogout} />;
+    console.log('Vendor user data:', user);
+    
+    // Check if vendor has full access and approved registration - show full portal
+    if (user.has_full_access && user.registration_status === 'approved') {
+      return <VendorPortalFullAccess user={user} onLogout={onLogout} />;
     }
     
-    // Only show portal if registration is approved
+    // Check if vendor has basic access and approved registration - show basic portal
     if (user.registration_status === 'approved') {
-      return user.has_full_access ? (
-        <VendorPortalFullAccess user={user} onLogout={onLogout} />
-      ) : (
-        <VendorPortal user={user} onLogout={onLogout} />
-      );
+      return <VendorPortal user={user} onLogout={onLogout} />;
+    }
+    
+    // If NDA is completed but registration is not approved, show vendor registration form
+    if (user.nda_status === 'completed' && user.registration_status !== 'approved') {
+      return <VendorRegistrationFormWrapper user={user} onLogout={onLogout} />;
     }
     
     // Default: show vendor registration form for any other case

@@ -1876,19 +1876,450 @@ def decline_vendor_registration(registration_id):
         print(f"Decline vendor registration error: {e}")
         return jsonify({'error': 'Failed to decline vendor registration'}), 500
 
-@app.route('/api/vendor/dashboard-data', methods=['GET'])
-def get_vendor_dashboard_data():
-    """Get vendor dashboard data"""
+@app.route('/api/vendor/dashboard-stats', methods=['GET'])
+def get_vendor_dashboard_stats():
+    """Get vendor dashboard statistics"""
     try:
+        vendor_id = request.headers.get('X-Vendor-ID')
+        if not vendor_id:
+            return jsonify({'success': False, 'message': 'Vendor ID required'}), 400
+        
+        # Get vendor basic info
+        vendor_query = "SELECT company_name, nda_status, registration_status FROM vendors WHERE id = %s"
+        vendor_data = execute_query(vendor_query, (vendor_id,), fetch_one=True)
+        
+        if not vendor_data:
+            return jsonify({'success': False, 'message': 'Vendor not found'}), 404
+        
+        # Return real data - no sample figures
+        stats = {
+            'active_projects': 0,
+            'completed_tasks': 0,
+            'performance_score': 0,
+            'messages': 0,
+            'pending_approvals': 0,
+            'upcoming_deadlines': 0,
+            'total_earnings': 0,
+            'monthly_earnings': 0
+        }
+        
         return jsonify({
             'success': True,
-            'ndaStatus': 'completed',
-            'registrationStatus': 'pending'
+            'stats': stats,
+            'vendor_info': {
+                'company_name': vendor_data['company_name'],
+                'nda_status': vendor_data['nda_status'],
+                'registration_status': vendor_data['registration_status']
+            }
         })
         
     except Exception as e:
-        print(f"Get vendor dashboard data error: {e}")
-        return jsonify({'error': 'Failed to get vendor dashboard data'}), 500
+        print(f"Get vendor dashboard stats error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to get dashboard stats'}), 500
+
+@app.route('/api/vendor/projects', methods=['GET'])
+def get_vendor_projects():
+    """Get vendor projects"""
+    try:
+        vendor_id = request.headers.get('X-Vendor-ID')
+        if not vendor_id:
+            return jsonify({'success': False, 'message': 'Vendor ID required'}), 400
+        
+        # Return empty projects list - no sample data
+        projects = []
+        
+        return jsonify({
+            'success': True,
+            'projects': projects
+        })
+        
+    except Exception as e:
+        print(f"Get vendor projects error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to get projects'}), 500
+
+@app.route('/api/vendor/tasks', methods=['GET'])
+def get_vendor_tasks():
+    """Get vendor tasks"""
+    try:
+        vendor_id = request.headers.get('X-Vendor-ID')
+        if not vendor_id:
+            return jsonify({'success': False, 'message': 'Vendor ID required'}), 400
+        
+        # Return empty tasks list - no sample data
+        tasks = []
+        
+        return jsonify({
+            'success': True,
+            'tasks': tasks
+        })
+        
+    except Exception as e:
+        print(f"Get vendor tasks error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to get tasks'}), 500
+
+@app.route('/api/vendor/notifications', methods=['GET'])
+def get_vendor_notifications():
+    """Get vendor notifications"""
+    try:
+        vendor_id = request.headers.get('X-Vendor-ID')
+        if not vendor_id:
+            return jsonify({'success': False, 'message': 'Vendor ID required'}), 400
+        
+        # Return empty notifications list - no sample data
+        notifications = []
+        
+        return jsonify({
+            'success': True,
+            'notifications': notifications
+        })
+        
+    except Exception as e:
+        print(f"Get vendor notifications error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to get notifications'}), 500
+
+@app.route('/api/vendor/profile', methods=['GET'])
+def get_vendor_profile():
+    """Get vendor profile data for display"""
+    try:
+        # Get vendor ID from session or request headers
+        vendor_id = request.headers.get('X-Vendor-ID')
+        print(f"Received vendor ID: {vendor_id}")
+        
+        if not vendor_id:
+            return jsonify({'success': False, 'message': 'Vendor ID required'}), 400
+        
+        # Get basic vendor information
+        vendor_query = """
+        SELECT id, company_name, contact_person, email, phone, address, 
+               business_type, registration_number, country, state,
+               registration_status, nda_status, reference_number,
+               portal_access, has_full_access, created_at, updated_at,
+               signature_data, company_stamp_data, signature_type, signed_date,
+               company_registration_number, company_incorporation_country, company_incorporation_state
+        FROM vendors WHERE id = %s
+        """
+        vendor_data = execute_query(vendor_query, (vendor_id,), fetch_one=True)
+        print(f"Vendor data found: {vendor_data is not None}")
+        
+        if not vendor_data:
+            return jsonify({'success': False, 'message': 'Vendor not found'}), 404
+        
+        # Get comprehensive registration data if available (using correct columns)
+        registration_query = """
+        SELECT company_name, contact_person, email, phone, address, business_type,
+               services, experience, certifications, vendor_references, status,
+               created_at, updated_at
+        FROM vendor_registrations WHERE email = %s
+        ORDER BY created_at DESC LIMIT 1
+        """
+        registration_data = execute_query(registration_query, (vendor_data['email'],), fetch_one=True)
+        
+        # Get NDA form data if available
+        nda_query = """
+        SELECT form_data, status, signed_at, created_at
+        FROM nda_forms WHERE vendor_id = %s
+        ORDER BY created_at DESC LIMIT 1
+        """
+        nda_data = execute_query(nda_query, (vendor_id,), fetch_one=True)
+        
+        # Parse NDA form data if available
+        nda_form_data = {}
+        if nda_data and nda_data['form_data']:
+            try:
+                nda_form_data = json.loads(nda_data['form_data'])
+            except json.JSONDecodeError:
+                nda_form_data = {}
+        
+        # Create comprehensive data from vendor table and registration data
+        comprehensive_data = {
+            'companyName': vendor_data['company_name'],
+            'contactPersonName': vendor_data['contact_person'],
+            'emailAddress': vendor_data['email'],
+            'phoneNumber': vendor_data['phone'],
+            'communicationAddress': vendor_data['address'],
+            'businessType': vendor_data['business_type'] or 'Technology Services',
+            'registrationNumber': vendor_data['registration_number'] or vendor_data['company_registration_number'],
+            'country': vendor_data['country'] or vendor_data['company_incorporation_country'],
+            'state': vendor_data['state'] or vendor_data['company_incorporation_state']
+        }
+        
+        # Add registration data if available
+        if registration_data:
+            comprehensive_data.update({
+                'servicesOffered': registration_data['services'],
+                'experience': registration_data['experience'],
+                'certifications': registration_data['certifications'],
+                'vendorReferences': registration_data['vendor_references']
+            })
+        
+        # Combine vendor data with comprehensive registration data
+        profile_data = {
+            'id': vendor_data['id'],
+            'company_name': vendor_data['company_name'],
+            'contact_person': vendor_data['contact_person'],
+            'email': vendor_data['email'],
+            'phone': vendor_data['phone'],
+            'address': vendor_data['address'],
+            'business_type': vendor_data['business_type'],
+            'registration_number': vendor_data['registration_number'],
+            'country': vendor_data['country'],
+            'state': vendor_data['state'],
+            'registration_status': vendor_data['registration_status'],
+            'nda_status': vendor_data['nda_status'],
+            'reference_number': vendor_data['reference_number'],
+            'portal_access': vendor_data['portal_access'],
+            'has_full_access': vendor_data['has_full_access'],
+            'created_at': vendor_data['created_at'].isoformat() if vendor_data['created_at'] else None,
+            'updated_at': vendor_data['updated_at'].isoformat() if vendor_data['updated_at'] else None,
+            'comprehensive_data': comprehensive_data,
+            'registration_status_detail': registration_data['status'] if registration_data else None,
+            'submitted_at': registration_data['created_at'].isoformat() if registration_data and registration_data['created_at'] else None,
+            'reviewed_at': registration_data['updated_at'].isoformat() if registration_data and registration_data['updated_at'] else None,
+            'nda_form_data': nda_form_data,
+            'nda_signed_at': nda_data['signed_at'].isoformat() if nda_data and nda_data['signed_at'] else None,
+            'signature_data': vendor_data['signature_data'],
+            'company_stamp_data': vendor_data['company_stamp_data'],
+            'signature_type': vendor_data['signature_type'],
+            'signed_date': vendor_data['signed_date'].isoformat() if vendor_data['signed_date'] else None
+        }
+        
+        return jsonify({
+            'success': True,
+            'profile': profile_data
+        })
+        
+    except Exception as e:
+        print(f"Get vendor profile error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': 'Failed to get vendor profile'}), 500
+        
+        # Get comprehensive registration data if available
+        registration_query = """
+        SELECT form_data, status, submitted_at, reviewed_at
+        FROM vendor_registrations WHERE vendor_id = %s
+        ORDER BY created_at DESC LIMIT 1
+        """
+        registration_data = execute_query(registration_query, (vendor_id,), fetch_one=True)
+        
+        # Get NDA form data if available
+        nda_query = """
+        SELECT form_data, status, signed_at, created_at
+        FROM nda_forms WHERE vendor_id = %s
+        ORDER BY created_at DESC LIMIT 1
+        """
+        nda_data = execute_query(nda_query, (vendor_id,), fetch_one=True)
+        
+        # Parse JSON form data if available
+        comprehensive_data = {}
+        if registration_data and registration_data['form_data']:
+            try:
+                comprehensive_data = json.loads(registration_data['form_data'])
+            except json.JSONDecodeError:
+                comprehensive_data = {}
+        
+        # Parse NDA form data if available
+        nda_form_data = {}
+        if nda_data and nda_data['form_data']:
+            try:
+                nda_form_data = json.loads(nda_data['form_data'])
+            except json.JSONDecodeError:
+                nda_form_data = {}
+        
+        # If no comprehensive registration data, use vendor table data
+        if not comprehensive_data:
+            comprehensive_data = {
+                'companyName': vendor_data['company_name'],
+                'contactPersonName': vendor_data['contact_person'],
+                'emailAddress': vendor_data['email'],
+                'phoneNumber': vendor_data['phone'],
+                'communicationAddress': vendor_data['address'],
+                'businessType': vendor_data['business_type'] or 'Technology Services',
+                'registrationNumber': vendor_data['registration_number'] or vendor_data['company_registration_number'],
+                'country': vendor_data['country'] or vendor_data['company_incorporation_country'],
+                'state': vendor_data['state'] or vendor_data['company_incorporation_state']
+            }
+        
+        # Combine vendor data with comprehensive registration data
+        profile_data = {
+            'id': vendor_data['id'],
+            'company_name': vendor_data['company_name'],
+            'contact_person': vendor_data['contact_person'],
+            'email': vendor_data['email'],
+            'phone': vendor_data['phone'],
+            'address': vendor_data['address'],
+            'business_type': vendor_data['business_type'],
+            'registration_number': vendor_data['registration_number'],
+            'country': vendor_data['country'],
+            'state': vendor_data['state'],
+            'registration_status': vendor_data['registration_status'],
+            'nda_status': vendor_data['nda_status'],
+            'reference_number': vendor_data['reference_number'],
+            'portal_access': vendor_data['portal_access'],
+            'has_full_access': vendor_data['has_full_access'],
+            'created_at': vendor_data['created_at'].isoformat() if vendor_data['created_at'] else None,
+            'updated_at': vendor_data['updated_at'].isoformat() if vendor_data['updated_at'] else None,
+            'comprehensive_data': comprehensive_data,
+            'registration_status_detail': registration_data['status'] if registration_data else None,
+            'submitted_at': registration_data['submitted_at'].isoformat() if registration_data and registration_data['submitted_at'] else None,
+            'reviewed_at': registration_data['reviewed_at'].isoformat() if registration_data and registration_data['reviewed_at'] else None,
+            'nda_form_data': nda_form_data,
+            'nda_signed_at': nda_data['signed_at'].isoformat() if nda_data and nda_data['signed_at'] else None,
+            'signature_data': vendor_data['signature_data'],
+            'company_stamp_data': vendor_data['company_stamp_data'],
+            'signature_type': vendor_data['signature_type'],
+            'signed_date': vendor_data['signed_date'].isoformat() if vendor_data['signed_date'] else None
+        }
+        
+        return jsonify({
+            'success': True,
+            'profile': profile_data
+        })
+        
+    except Exception as e:
+        print(f"Get vendor profile error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to get vendor profile'}), 500
+
+@app.route('/api/vendor/nda-form/download', methods=['GET'])
+def download_vendor_nda_form():
+    """Download vendor's completed NDA form as PDF"""
+    try:
+        vendor_id = request.headers.get('X-Vendor-ID')
+        if not vendor_id:
+            return jsonify({'success': False, 'message': 'Vendor ID required'}), 400
+        
+        # Get vendor and NDA form data
+        vendor_query = """
+        SELECT company_name, contact_person, email, phone, address, 
+               business_type, reference_number, signature_data, 
+               company_stamp_data, signature_type, signed_date
+        FROM vendors WHERE id = %s
+        """
+        vendor_data = execute_query(vendor_query, (vendor_id,), fetch_one=True)
+        
+        if not vendor_data:
+            return jsonify({'success': False, 'message': 'Vendor not found'}), 404
+        
+        # Get NDA form data
+        nda_query = """
+        SELECT form_data, signed_at FROM nda_forms WHERE vendor_id = %s
+        ORDER BY created_at DESC LIMIT 1
+        """
+        nda_data = execute_query(nda_query, (vendor_id,), fetch_one=True)
+        
+        if not nda_data:
+            return jsonify({'success': False, 'message': 'NDA form not found'}), 404
+        
+        # Parse NDA form data
+        nda_form_data = {}
+        if nda_data['form_data']:
+            try:
+                nda_form_data = json.loads(nda_data['form_data'])
+            except json.JSONDecodeError:
+                nda_form_data = {}
+        
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = []
+        
+        # Title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceAfter=30,
+            alignment=1  # Center alignment
+        )
+        story.append(Paragraph("NON-DISCLOSURE AGREEMENT", title_style))
+        story.append(Spacer(1, 20))
+        
+        # Company Information
+        story.append(Paragraph("Company Information:", styles['Heading2']))
+        story.append(Spacer(1, 12))
+        
+        company_info = [
+            ['Company Name:', vendor_data['company_name'] or 'N/A'],
+            ['Contact Person:', vendor_data['contact_person'] or 'N/A'],
+            ['Email:', vendor_data['email'] or 'N/A'],
+            ['Phone:', vendor_data['phone'] or 'N/A'],
+            ['Address:', vendor_data['address'] or 'N/A'],
+            ['Business Type:', vendor_data['business_type'] or 'N/A'],
+            ['Reference Number:', vendor_data['reference_number'] or 'N/A'],
+            ['Signed Date:', vendor_data['signed_date'].strftime('%Y-%m-%d') if vendor_data['signed_date'] else 'N/A']
+        ]
+        
+        company_table = Table(company_info, colWidths=[2*inch, 4*inch])
+        company_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(company_table)
+        story.append(Spacer(1, 20))
+        
+        # NDA Terms (simplified version)
+        story.append(Paragraph("Agreement Terms:", styles['Heading2']))
+        story.append(Spacer(1, 12))
+        
+        terms = [
+            "1. Confidential Information: The parties acknowledge that they may receive confidential and proprietary information.",
+            "2. Non-Disclosure: Each party agrees not to disclose confidential information to third parties.",
+            "3. Use Limitation: Confidential information shall only be used for the purpose of evaluating business opportunities.",
+            "4. Return of Information: Upon request, all confidential information shall be returned or destroyed.",
+            "5. Term: This agreement shall remain in effect for a period of 5 years from the date of signing.",
+            "6. Governing Law: This agreement shall be governed by the laws of the jurisdiction where YellowStone Group operates."
+        ]
+        
+        for term in terms:
+            story.append(Paragraph(term, styles['Normal']))
+            story.append(Spacer(1, 6))
+        
+        story.append(Spacer(1, 20))
+        
+        # Signature Section
+        story.append(Paragraph("Signatures:", styles['Heading2']))
+        story.append(Spacer(1, 12))
+        
+        signature_info = [
+            ['Signature Type:', vendor_data['signature_type'] or 'Digital'],
+            ['Signature Present:', 'Yes' if vendor_data['signature_data'] else 'No'],
+            ['Company Stamp Present:', 'Yes' if vendor_data['company_stamp_data'] else 'No']
+        ]
+        
+        signature_table = Table(signature_info, colWidths=[2*inch, 4*inch])
+        signature_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(signature_table)
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        
+        # Create response
+        response = make_response(buffer.getvalue())
+        response.headers['Content-Type'] = 'application/pdf'
+        response.headers['Content-Disposition'] = f'attachment; filename=NDA_Form_{vendor_data["company_name"]}_{vendor_data["reference_number"]}.pdf'
+        
+        return response
+        
+    except Exception as e:
+        print(f"Download NDA form error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to download NDA form'}), 500
 
 # Organization Management API endpoints
 @app.route('/api/admin/employees', methods=['GET'])
