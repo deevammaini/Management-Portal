@@ -231,3 +231,42 @@ CREATE INDEX idx_tickets_status ON tickets(status);
 CREATE INDEX idx_attendance_user_date ON attendance(user_id, date);
 CREATE INDEX idx_lead_generation_reports_uploaded_by ON lead_generation_reports(uploaded_by);
 CREATE INDEX idx_lead_generation_reports_company ON lead_generation_reports(company_name);
+
+-- Create lead_assignments table
+CREATE TABLE IF NOT EXISTS lead_assignments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    lead_id INT NOT NULL,
+    employee_id INT NOT NULL,
+    assigned_by INT NOT NULL,
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    due_date DATE,
+    status ENUM('assigned', 'in_progress', 'completed', 'cancelled') DEFAULT 'assigned',
+    notes TEXT,
+    progress_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (lead_id) REFERENCES lead_generation_reports(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_lead_assignment (lead_id, employee_id)
+);
+
+-- Create lead_progress_updates table
+CREATE TABLE IF NOT EXISTS lead_progress_updates (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    lead_assignment_id INT NOT NULL,
+    employee_id INT NOT NULL,
+    status ENUM('new', 'contacted', 'qualified', 'proposal', 'negotiation', 'closed_won', 'closed_lost') NOT NULL,
+    progress_notes TEXT,
+    next_action TEXT,
+    next_action_date DATE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (lead_assignment_id) REFERENCES lead_assignments(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Add indexes for better performance
+CREATE INDEX idx_lead_assignments_employee ON lead_assignments(employee_id);
+CREATE INDEX idx_lead_assignments_status ON lead_assignments(status);
+CREATE INDEX idx_lead_progress_updates_assignment ON lead_progress_updates(lead_assignment_id);
+CREATE INDEX idx_lead_progress_updates_employee ON lead_progress_updates(employee_id);

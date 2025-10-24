@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Users, FileText, CheckCircle, Bell, LogOut, Home, Briefcase,
-  BarChart3, Settings, Send, Download, Plus, TrendingUp, Menu, X, CheckSquare, Ticket, ClipboardList, ChevronDown
+  BarChart3, Settings, Send, Download, Plus, TrendingUp, Menu, X, CheckSquare, Ticket, ClipboardList, ChevronDown, Target
 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 import StatsCard from './StatsCard';
@@ -16,6 +16,7 @@ import OrganizationStructureView from './OrganizationStructureView';
 import TasksView from './TasksView';
 import ProjectsView from './ProjectsView';
 import TicketsView from './TicketsView';
+import GenerateLeadsView from './GenerateLeadsView';
 import AttendanceView from './AttendanceView';
 import SendNDAModal from './SendNDAModal';
 import BulkSendNDAModal from './BulkSendNDAModal';
@@ -269,6 +270,7 @@ const AdminDashboard = ({ user, onLogout }) => {
               { id: 'tasks', label: 'Tasks', icon: CheckSquare },
               { id: 'projects', label: 'Projects', icon: Briefcase },
               { id: 'tickets', label: 'Tickets', icon: Ticket },
+              { id: 'generate-leads', label: 'Generate Leads', icon: Target },
               { id: 'attendance', label: 'Attendance Info', icon: CheckCircle },
               { id: 'organization', label: 'Organization', icon: Users }
             ].map(tab => (
@@ -545,6 +547,7 @@ const AdminDashboard = ({ user, onLogout }) => {
         {activeTab === 'tasks' && <TasksView showNotification={showNotification} />}
         {activeTab === 'projects' && <ProjectsView showNotification={showNotification} />}
         {activeTab === 'tickets' && <TicketsView showNotification={showNotification} />}
+        {activeTab === 'generate-leads' && <GenerateLeadsView showNotification={showNotification} />}
         {activeTab === 'attendance' && <AttendanceView showNotification={showNotification} />}
         {activeTab === 'organization' && <OrganizationStructureView showNotification={showNotification} />}
         </main>

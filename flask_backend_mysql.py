@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # Flask backend for Yellowstone Management Portal with MySQL
 
 from flask import Flask, jsonify, request, send_file, session, send_from_directory, redirect, make_response
@@ -6,6 +6,8 @@ from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import os
 from datetime import datetime, timedelta
+import threading
+import time
 import mysql.connector
 from mysql.connector import Error
 import bcrypt
@@ -139,8 +141,8 @@ def get_db_connection():
         # Database connection successful
         return connection
     except Error as e:
-        print(f"❌ Error connecting to MySQL: {e}")
-        print(f"❌ Connection details: {DB_CONFIG}")
+        print(f"âŒ Error connecting to MySQL: {e}")
+        print(f"âŒ Connection details: {DB_CONFIG}")
         return None
 
 def execute_query(query, params=None, fetch_one=False, fetch_all=False):
@@ -164,10 +166,10 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
             results = cursor.fetchall()
             return results if results else []
         else:
-            result = None
-        
-        connection.commit()
-        return result
+            # For INSERT, UPDATE, DELETE queries
+            results = cursor.fetchall()
+            connection.commit()
+            return results if results else []
     except Error as e:
         print(f"MySQL query error: {e}")
         print(f"Query: {query}")
@@ -893,7 +895,7 @@ def test_send_nda():
         if result is None:
             return jsonify({'success': False, 'error': 'Database connection failed'}), 500
         
-        print(f"✅ Database connection working - {result['count']} vendors found")
+        print(f"âœ… Database connection working - {result['count']} vendors found")
         
         print(f"SMTP Configuration:")
         print(f"  Server: {SMTP_SERVER}")
@@ -908,10 +910,10 @@ def test_send_nda():
             msg['Subject'] = 'Test NDA Email'
             msg.attach(MIMEText('Test email body', 'plain'))
             
-            print("✅ Email message created successfully")
+            print("âœ… Email message created successfully")
             
         except Exception as email_test_error:
-            print(f"❌ Email message creation failed: {email_test_error}")
+            print(f"âŒ Email message creation failed: {email_test_error}")
             return jsonify({'success': False, 'error': f'Email configuration error: {str(email_test_error)}'}), 500
         
         return jsonify({
@@ -923,7 +925,7 @@ def test_send_nda():
         })
         
     except Exception as e:
-        print(f"❌ Test NDA error: {e}")
+        print(f"âŒ Test NDA error: {e}")
         return jsonify({'success': False, 'error': f'Test failed: {str(e)}'}), 500
 
 @app.route('/api/health', methods=['GET'])
@@ -1612,7 +1614,7 @@ def register_vendor_detailed():
         # Test database connection first
         test_connection = get_db_connection()
         if not test_connection:
-            print("❌ Database connection failed")
+            print("âŒ Database connection failed")
             return jsonify({'error': 'Database connection failed. Please try again later.'}), 500
         
         # Check if vendor already exists, create if not
@@ -2325,46 +2327,7 @@ def download_vendor_nda_form():
         return jsonify({'success': False, 'message': 'Failed to download NDA form'}), 500
 
 # Organization Management API endpoints
-@app.route('/api/admin/employees', methods=['GET'])
-def get_all_employees():
-    """Get all employees with their details"""
-    try:
-        query = """
-        SELECT id, name, email, employee_id, designation, department, manager, 
-               phone, address, hire_date, salary, emergency_contact, status, 
-               created_at, updated_at
-        FROM users 
-        WHERE user_type = 'employee'
-        ORDER BY name
-        """
-        employees = execute_query(query, fetch_all=True)
-        
-        employee_list = []
-        for emp in employees:
-            employee_dict = {
-                'id': emp['id'],
-                'name': emp['name'],
-                'email': emp['email'],
-                'employeeId': emp['employee_id'],
-                'position': emp['designation'],
-                'department': emp['department'],
-                'manager': emp['manager'],
-                'phone': emp.get('phone', ''),
-                'address': emp.get('address', ''),
-                'hireDate': emp.get('hire_date', ''),
-                'salary': emp.get('salary', ''),
-                'emergencyContact': emp.get('emergency_contact', ''),
-                'status': emp.get('status', 'active'),
-                'submitted_at': emp['created_at'],
-                'avatar': _generate_avatar(emp['name'])
-            }
-            employee_list.append(employee_dict)
-        
-        return jsonify(employee_list)
-        
-    except Exception as e:
-        print(f"Get all employees error: {e}")
-        return jsonify({'error': 'Failed to get employees'}), 500
+# Removed duplicate route - using get_admin_employees instead
 
 @app.route('/api/admin/employees', methods=['POST'])
 def create_employee():
@@ -2410,6 +2373,45 @@ def create_employee():
     except Exception as e:
         print(f"Create employee error: {e}")
         return jsonify({'success': False, 'message': 'Failed to create employee'}), 500
+
+@app.route('/api/admin/employees/<int:employee_id>', methods=['GET'])
+def get_admin_employee_by_id(employee_id):
+    """Get specific employee by ID for admin dashboard"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        # Check if user is admin
+        admin_check = execute_query("SELECT role FROM admins WHERE id = %s", (admin_id,), fetch_one=True)
+        if not admin_check or admin_check['role'] != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Get specific employee with department info
+        query = """
+        SELECT 
+            u.id, u.employee_id, u.name, u.email, u.designation,
+            u.phone, u.is_active, u.created_at,
+            d.name as department_name,
+            m.name as manager_name,
+            m.id as manager_id
+        FROM users u
+        LEFT JOIN departments d ON u.department_id = d.id
+        LEFT JOIN users m ON u.manager_id = m.id
+        WHERE u.employee_id = %s AND u.is_active = 1
+        """
+        
+        employee = execute_query(query, (employee_id,), fetch_one=True)
+        
+        if employee:
+            return jsonify({'success': True, 'employee': employee})
+        else:
+            return jsonify({'success': False, 'error': 'Employee not found'}), 404
+        
+    except Exception as e:
+        print(f"âŒ Error getting employee by ID: {e}")
+        return jsonify({'error': 'Failed to get employee'}), 500
+
 
 @app.route('/api/admin/employees/<int:employee_id>', methods=['PUT'])
 def update_employee(employee_id):
@@ -3271,10 +3273,36 @@ YellowStone Xperiences Team
 def send_bulk_nda():
     """Send NDA to multiple vendors"""
     try:
+        print("ðŸ” Bulk NDA request received")
         data = request.get_json()
+        print(f"ðŸ“Š Data received: {data}")
+        
+        # Handle both old and new data structures
         vendors = data.get('vendors', [])
+        selected_vendors = data.get('selected_vendors', [])
+        new_vendors = data.get('new_vendors', [])
+        
+        print(f"ðŸ“‹ Vendors count: {len(vendors)}")
+        print(f"ðŸ“‹ Selected vendors count: {len(selected_vendors)}")
+        print(f"ðŸ“‹ New vendors count: {len(new_vendors)}")
+        
+        # If using selected_vendors format, fetch vendor details from database
+        if selected_vendors and not vendors:
+            print("ðŸ”„ Fetching vendor details for selected IDs...")
+            vendor_ids_str = ','.join(map(str, selected_vendors))
+            vendor_query = f"SELECT id, email, company_name FROM vendors WHERE id IN ({vendor_ids_str})"
+            vendor_details = execute_query(vendor_query, fetch_all=True)
+            vendors = vendor_details if vendor_details else []
+            print(f"ðŸ“‹ Fetched {len(vendors)} vendor details")
+        
+        # Add new vendors to the list
+        if new_vendors:
+            vendors.extend(new_vendors)
+        
+        print(f"ðŸ“‹ Total vendors to process: {len(vendors)}")
         
         if not vendors:
+            print("âŒ No vendors selected")
             return jsonify({'success': False, 'message': 'No vendors selected'}), 400
         
         results = []
@@ -3422,7 +3450,7 @@ def google_form_webhook():
         vendor = execute_query(vendor_query, (reference_number,), fetch_one=True)
         
         if not vendor:
-            print(f"❌ Vendor not found for reference: {reference_number}")
+            print(f"âŒ Vendor not found for reference: {reference_number}")
             return jsonify({'success': False, 'message': 'Vendor not found'}), 404
         
         vendor_id = vendor[0]
@@ -3460,9 +3488,9 @@ def google_form_webhook():
                 execute_query(update_query, (
                     json.dumps(form_data), submission_timestamp, vendor_id
                 ))
-                print(f"✅ NDA form updated for vendor {vendor_id}")
+                print(f"âœ… NDA form updated for vendor {vendor_id}")
             except Exception as db_error:
-                print(f"❌ Database update error: {db_error}")
+                print(f"âŒ Database update error: {db_error}")
                 return jsonify({'success': False, 'message': f'Database error: {str(db_error)}'}), 500
         else:
             # Create new NDA form
@@ -3475,9 +3503,9 @@ def google_form_webhook():
                 execute_query(insert_query, (
                     vendor_id, json.dumps(form_data), submission_timestamp
                 ))
-                print(f"✅ New NDA form created for vendor {vendor_id}")
+                print(f"âœ… New NDA form created for vendor {vendor_id}")
             except Exception as db_error:
-                print(f"❌ Database insert error: {db_error}")
+                print(f"âŒ Database insert error: {db_error}")
                 return jsonify({'success': False, 'message': f'Database error: {str(db_error)}'}), 500
         
         # Also update vendor status
@@ -3489,9 +3517,9 @@ def google_form_webhook():
         
         try:
             execute_query(vendor_update_query, (submission_timestamp, vendor_id))
-            print(f"✅ Vendor status updated for {company_name}")
+            print(f"âœ… Vendor status updated for {company_name}")
         except Exception as db_error:
-            print(f"⚠️ Vendor status update error: {db_error}")
+            print(f"âš ï¸ Vendor status update error: {db_error}")
         
         return jsonify({
             'success': True, 
@@ -3499,7 +3527,7 @@ def google_form_webhook():
         })
         
     except Exception as e:
-        print(f"❌ Google Form webhook error: {e}")
+        print(f"âŒ Google Form webhook error: {e}")
         return jsonify({'success': False, 'message': 'Failed to process form submission'}), 500
 
 @app.route('/api/admin/send-nda', methods=['POST'])
@@ -3513,7 +3541,7 @@ def send_nda():
         print(f"NDA Send Request: email={email}, company={company_name}")
         
         if not email:
-            print("❌ Email is required")
+            print("âŒ Email is required")
             return jsonify({'success': False, 'error': 'Email is required'}), 400
         
         reference_number = generate_reference_number()
@@ -3529,7 +3557,7 @@ def send_nda():
             WHERE email = %s
             """
             result = execute_query(query, (company_name, reference_number, datetime.now(), email))
-            print(f"✅ Vendor update query executed successfully")
+            print(f"âœ… Vendor update query executed successfully")
         else:
             print(f"Creating new vendor")
             query = """
@@ -3537,9 +3565,9 @@ def send_nda():
             VALUES (%s, %s, %s, %s, %s)
             """
             result = execute_query(query, (email, company_name, 'sent', reference_number, datetime.now()))
-            print(f"✅ Vendor insert query executed successfully")
+            print(f"âœ… Vendor insert query executed successfully")
         
-        print(f"✅ Vendor record saved successfully")
+        print(f"âœ… Vendor record saved successfully")
         
         try:
             msg = MIMEMultipart()
@@ -3591,15 +3619,15 @@ Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India
             server.sendmail(SMTP_USERNAME, email, text)
             server.quit()
             
-            print(f"✅ NDA email sent successfully to {email} with reference {reference_number}")
+            print(f"âœ… NDA email sent successfully to {email} with reference {reference_number}")
             
         except Exception as email_error:
-            print(f"❌ Email sending failed: {email_error}")
+            print(f"âŒ Email sending failed: {email_error}")
             return jsonify({'success': True, 'message': 'NDA recorded but email delivery failed', 'reference_number': reference_number, 'email_error': str(email_error)})
         
         return jsonify({'success': True, 'message': 'NDA sent successfully', 'reference_number': reference_number})
     except Exception as e:
-        print(f"❌ Send NDA error: {e}")
+        print(f"âŒ Send NDA error: {e}")
         return jsonify({'success': False, 'error': f'Failed to send NDA: {str(e)}'}), 500
 
 # Static file serving
@@ -3737,11 +3765,11 @@ YellowStone XPs Management Team
         server.sendmail(SMTP_USERNAME, vendor_email, text)
         server.quit()
         
-        print(f"✅ Credentials email sent to {vendor_email}")
+        print(f"âœ… Credentials email sent to {vendor_email}")
         return True
         
     except Exception as e:
-        print(f"❌ Failed to send credentials email: {e}")
+        print(f"âŒ Failed to send credentials email: {e}")
         return False
 
 def broadcast_database_change(table_name, action, data=None, room='admin'):
@@ -4098,7 +4126,7 @@ def update_employee_project(project_id):
         })
         
     except Exception as e:
-        print(f"❌ Error updating employee project: {e}")
+        print(f"âŒ Error updating employee project: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/employee/tasks/<int:task_id>/update', methods=['POST', 'PUT'])
@@ -4131,7 +4159,7 @@ def update_employee_task(task_id):
         })
         
     except Exception as e:
-        print(f"❌ Error updating employee task: {e}")
+        print(f"âŒ Error updating employee task: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/employee/tickets/<int:ticket_id>/update', methods=['POST', 'PUT'])
@@ -4164,7 +4192,7 @@ def update_employee_ticket(ticket_id):
         })
         
     except Exception as e:
-        print(f"❌ Error updating employee ticket: {e}")
+        print(f"âŒ Error updating employee ticket: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/employee/upload-profile-picture', methods=['POST'])
@@ -4203,43 +4231,9 @@ def upload_profile_picture():
             return jsonify({'error': 'Invalid file type. Only PNG, JPG, JPEG, and GIF are allowed.'}), 400
             
     except Exception as e:
-        print(f"❌ Upload profile picture error: {e}")
+        print(f"âŒ Upload profile picture error: {e}")
         return jsonify({'error': 'Failed to upload profile picture'}), 500
 
-@app.route('/api/employee/test-lead-upload', methods=['GET'])
-def test_lead_upload():
-    """Test endpoint to check if lead upload functionality is ready"""
-    try:
-        user_id = session.get('user_id')
-        if not user_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
-        # Check if lead_generation_reports table exists
-        try:
-            test_query = "SELECT COUNT(*) as count FROM lead_generation_reports LIMIT 1"
-            result = execute_query(test_query)
-            table_exists = True
-        except Exception as e:
-            table_exists = False
-            table_error = str(e)
-        
-        # Check if pandas is available
-        try:
-            import pandas as pd
-            pandas_available = True
-        except ImportError:
-            pandas_available = False
-        
-        return jsonify({
-            'success': True,
-            'user_id': user_id,
-            'table_exists': table_exists,
-            'pandas_available': pandas_available,
-            'table_error': table_error if not table_exists else None
-        })
-        
-    except Exception as e:
-        return jsonify({'error': f'Test failed: {str(e)}'}), 500
 
 @app.route('/api/employee/upload-lead-report', methods=['POST'])
 def upload_lead_report():
@@ -4595,9 +4589,9 @@ def remove_profile_picture():
                 file_path = os.path.join(PROFILE_PHOTOS_FOLDER, profile_picture_path)
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                    print(f"✅ Profile picture file deleted: {file_path}")
+                    print(f"âœ… Profile picture file deleted: {file_path}")
             except Exception as e:
-                print(f"⚠️ Could not delete profile picture file: {e}")
+                print(f"âš ï¸ Could not delete profile picture file: {e}")
         
         return jsonify({
             'success': True,
@@ -4605,7 +4599,7 @@ def remove_profile_picture():
         })
         
     except Exception as e:
-        print(f"❌ Remove profile picture error: {e}")
+        print(f"âŒ Remove profile picture error: {e}")
         return jsonify({'error': 'Failed to remove profile picture'}), 500
 
 @app.route('/api/employee/profile-picture/<filename>')
@@ -4614,8 +4608,1204 @@ def get_profile_picture(filename):
     try:
         return send_from_directory(PROFILE_PHOTOS_FOLDER, filename)
     except Exception as e:
-        print(f"❌ Error serving profile picture: {e}")
+        # print(f"âŒ Error serving profile picture: {e}")
         return jsonify({'error': 'Profile picture not found'}), 404
+
+# ==================== EMPLOYEE LEAD MANAGEMENT ENDPOINTS ====================
+
+@app.route('/api/employee/assigned-leads', methods=['GET'])
+def get_employee_assigned_leads():
+    """Get leads assigned to the current employee"""
+    try:
+        employee_id = request.args.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'error': 'Employee ID required'}), 400
+        
+        # print(f"🔍 Debug assigned leads - employee_id: {employee_id}")
+        
+        # Get employee's assigned leads with lead details
+        query = """
+        SELECT
+            la.id as lead_assignment_id,
+            la.employee_id,
+            la.status,
+            la.progress_notes,
+            la.created_at,
+            la.assigned_at,
+            la.due_date,
+            la.notes as assignment_notes,
+            lgr.id as lead_id,
+            lgr.company_name,
+            lgr.project_name,
+            lgr.client_email,
+            lgr.location,
+            lgr.lead_status,
+            lgr.priority,
+            lgr.estimated_value,
+            lgr.industry,
+            u.name as assigned_by_name
+        FROM lead_assignments la
+        JOIN lead_generation_reports lgr ON la.lead_id = lgr.id
+        LEFT JOIN users u ON la.assigned_by = u.id
+        WHERE la.employee_id = %s
+        ORDER BY la.assigned_at DESC
+        """
+        
+        leads = execute_query(query, (employee_id,))
+        
+        # print(f"🔍 Debug: Employee {employee_id} assigned leads: {leads}")
+        if leads:
+            for lead in leads:
+                # print(f"🔍 Debug: Lead {lead.get('lead_id')} assigned_by_name: {lead.get('assigned_by_name')}")
+                pass
+        
+        return jsonify({'success': True, 'leads': leads})
+        
+    except Exception as e:
+        print(f"âŒ Error getting employee assigned leads: {e}")
+        return jsonify({'error': 'Failed to get assigned leads'}), 500
+
+@app.route('/api/employee/leads/<int:assignment_id>/progress', methods=['POST'])
+def update_lead_progress(assignment_id):
+    """Update lead progress by employee"""
+    try:
+        employee_id = request.args.get('employee_id')
+        if not employee_id:
+            return jsonify({'success': False, 'error': 'Employee ID required'}), 400
+        
+        data = request.get_json()
+        status = data.get('status')
+        progress_notes = data.get('progress_notes')
+        
+        # Verify the assignment belongs to this employee
+        assignment_check = execute_query(
+            "SELECT id, lead_id FROM lead_assignments WHERE id = %s AND employee_id = %s",
+            (assignment_id, employee_id),
+            fetch_one=True
+        )
+        
+        if not assignment_check:
+            return jsonify({'error': 'Assignment not found or not authorized'}), 404
+        
+        # Update the assignment
+        update_query = """
+        UPDATE lead_assignments 
+        SET status = %s, 
+            progress_notes = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = %s AND employee_id = %s
+        """
+        
+        execute_query(update_query, (status, progress_notes, assignment_id, employee_id))
+        
+        return jsonify({'success': True, 'message': 'Lead progress updated successfully'})
+        
+    except Exception as e:
+        print(f"âŒ Error updating lead progress: {e}")
+        return jsonify({'error': 'Failed to update lead progress'}), 500
+
+# ==================== LEAD MANAGEMENT ENDPOINTS ====================
+
+@app.route('/api/admin/leads', methods=['GET'])
+def get_admin_leads():
+    """Get all leads for admin dashboard"""
+    try:
+        admin_id = session.get('user_id')
+        user_type = session.get('user_type')
+        # print(f"ðŸ” Debug GET leads - admin_id: {admin_id}, user_type: {user_type}")
+        if not admin_id or user_type != 'admin':
+            print(f"âŒ GET leads Authentication failed - admin_id: {admin_id}, user_type: {user_type}")
+            return jsonify({'error': 'Not authenticated as admin'}), 403
+        
+        # Get all leads with LATEST assignment information (by assigned_at) 
+        query = """
+        SELECT
+            lgr.*,
+            la.id as assignment_id,
+            la.employee_id as assigned_to,
+            la.status as assignment_status,
+            la.due_date as assignment_due_date,
+            la.notes as assignment_notes,
+            u.name as assigned_employee_name,
+            u.designation as assigned_employee_designation,
+            assigner.name as assigned_by_name
+        FROM lead_generation_reports lgr
+        LEFT JOIN (
+            SELECT la1.*
+            FROM lead_assignments la1
+            INNER JOIN (
+                SELECT lead_id, MAX(assigned_at) as latest_assignment_time
+                FROM lead_assignments
+                GROUP BY lead_id
+            ) la2 ON la1.lead_id = la2.lead_id AND la1.assigned_at = la2.latest_assignment_time
+        ) la ON lgr.id = la.lead_id
+        LEFT JOIN users u ON la.employee_id = u.id
+        LEFT JOIN users assigner ON la.assigned_by = assigner.id
+        ORDER BY lgr.created_at DESC
+        """
+        
+        leads = execute_query(query)
+        
+        # Debug: Check what assignments exist for lead 199
+        debug_query = "SELECT * FROM lead_assignments WHERE lead_id = 199 ORDER BY id DESC"
+        debug_assignments = execute_query(debug_query)
+        # print(f"ðŸ” Debug: All assignments for lead 199: {debug_assignments}")
+        
+        # print(f"ðŸ” Debug: Raw leads from DB: {leads}")
+        
+        # Convert to list format for frontend (query already handles latest assignment)
+        result_leads = []
+        for lead in leads:
+            result_leads.append({
+                'id': lead['id'],
+                'company_name': lead['company_name'],
+                'project_name': lead['project_name'],
+                'key_account_manager': lead['key_account_manager'],
+                'project_coordinator': lead['project_coordinator'],
+                'client_end_manager': lead['client_end_manager'],
+                'client_email': lead['client_email'],
+                'location': lead['location'],
+                'start_date': lead['start_date'],
+                'expected_project_start_date': lead['expected_project_start_date'],
+                'last_interacted_date': lead['last_interacted_date'],
+                'lead_status': lead['lead_status'],
+                'lead_source': lead['lead_source'],
+                'remarks': lead['remarks'],
+                'uploaded_by': lead['uploaded_by'],
+                'uploaded_at': lead['uploaded_at'],
+                'created_at': lead['created_at'],
+                'updated_at': lead['updated_at'],
+                'assigned_to': lead['assigned_to'],
+                'assignment_status': lead['assignment_status'],
+                'assignment_due_date': lead['assignment_due_date'],
+                'assignment_notes': lead['assignment_notes'],
+                'assigned_employee_name': lead['assigned_employee_name'],
+                'assigned_employee_designation': lead['assigned_employee_designation']
+            })
+        
+        return jsonify(result_leads)
+        
+    except Exception as e:
+        print(f"âŒ Error getting leads: {e}")
+        return jsonify({'error': 'Failed to get leads'}), 500
+
+@app.route('/api/admin/leads', methods=['POST'])
+def create_lead():
+    """Create a new lead"""
+    try:
+        admin_id = session.get('user_id')
+        user_type = session.get('user_type')
+        # print(f"ðŸ” Debug - admin_id: {admin_id}, user_type: {user_type}")
+        if not admin_id or user_type != 'admin':
+            print(f"âŒ Authentication failed - admin_id: {admin_id}, user_type: {user_type}")
+            return jsonify({'error': 'Not authenticated as admin'}), 403
+        
+        data = request.get_json()
+        
+        # Check if there are any users in the database to use as uploaded_by
+        user_check = execute_query("SELECT id FROM users LIMIT 1", fetch_one=True)
+        uploaded_by_id = user_check['id'] if user_check else None
+        
+        # Insert new lead
+        query = """
+        INSERT INTO lead_generation_reports 
+        (company_name, project_name, key_account_manager, project_coordinator, 
+         client_end_manager, client_email, client_phone, location, industry,
+         priority, estimated_value, start_date, 
+         expected_project_start_date, last_interacted_date, lead_status, 
+         lead_source, remarks, uploaded_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        values = (
+            data.get('company_name'),
+            data.get('project_name'),
+            data.get('key_account_manager'),
+            data.get('project_coordinator'),
+            data.get('client_end_manager'),
+            data.get('client_email'),
+            data.get('client_phone'),
+            data.get('location'),
+            data.get('industry'),
+            data.get('priority'),
+            data.get('estimated_value'),
+            data.get('start_date'),
+            data.get('expected_project_start_date'),
+            data.get('last_interacted_date'),
+            data.get('lead_status', 'new'),
+            data.get('lead_source'),
+            data.get('remarks'),
+            uploaded_by_id  # Use first available user ID or None
+        )
+        
+        execute_query(query, values)
+        
+        # Get the ID of the created lead
+        lead_id = execute_query("SELECT LAST_INSERT_ID() as id", fetch_one=True)['id']
+        
+        return jsonify({'success': True, 'message': 'Lead created successfully', 'lead_id': lead_id})
+        
+    except Exception as e:
+        print(f"âŒ Error creating lead: {e}")
+        return jsonify({'error': 'Failed to create lead'}), 500
+
+@app.route('/api/admin/leads/<int:lead_id>/assign', methods=['POST'])
+def assign_lead(lead_id):
+        # print(f"🔍 Debug: assign_lead function called for lead_id: {lead_id}")
+    """Assign a lead to an employee"""
+    try:
+        admin_id = session.get('user_id')
+        user_type = session.get('user_type')
+        if not admin_id or user_type != 'admin':
+            return jsonify({'error': 'Not authenticated as admin'}), 403
+        
+        data = request.get_json()
+        employee_id = data.get('employee_id')
+        due_date = data.get('due_date')
+        notes = data.get('notes')
+        
+        if not employee_id:
+            return jsonify({'error': 'Employee ID is required'}), 400
+        
+        # Check if lead exists and get company name
+        lead_check = execute_query("SELECT id, company_name FROM lead_generation_reports WHERE id = %s", (lead_id,))
+        if not lead_check:
+            return jsonify({'error': 'Lead not found'}), 404
+        
+        lead_data = lead_check[0]
+        
+        # Check if employee exists by employee_id field
+        employee_check = execute_query("SELECT id, name FROM users WHERE employee_id = %s", (employee_id,))
+        if not employee_check:
+            return jsonify({'error': f'Employee with ID {employee_id} not found'}), 404
+        
+        employee = employee_check[0]
+        actual_employee_id = employee['id']  # Get the database ID
+        
+        # Use the admin who is assigning the lead as assigned_by
+        # First check if the admin_id exists in users table
+        admin_user_check = execute_query("SELECT id FROM users WHERE id = %s", (admin_id,), fetch_one=True)
+        if admin_user_check:
+            assigned_by_id = admin_id
+        else:
+            # If admin_id doesn't exist, find any user to use as assigned_by
+            any_user_check = execute_query("SELECT id FROM users LIMIT 1", fetch_one=True)
+            assigned_by_id = any_user_check['id'] if any_user_check else actual_employee_id
+        
+        # Handle empty due_date
+        if not due_date or due_date.strip() == '':
+            due_date = None
+        
+        # Insert assignment
+        assignment_query = """
+        INSERT INTO lead_assignments (lead_id, employee_id, assigned_by, due_date, notes)
+        VALUES (%s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+        assigned_by = VALUES(assigned_by),
+        due_date = VALUES(due_date),
+        notes = VALUES(notes),
+        status = 'assigned',
+        updated_at = CURRENT_TIMESTAMP
+        """
+        
+        execute_query(assignment_query, (lead_id, actual_employee_id, assigned_by_id, due_date, notes))
+        
+        # print(f"ðŸ” Debug: Lead {lead_id} assigned to employee {actual_employee_id}")
+        # print(f"ðŸ” Debug: Assignment query executed successfully")
+        
+        return jsonify({'success': True, 'message': 'Lead assigned successfully'})
+        
+    except Exception as e:
+        print(f"âŒ Error assigning lead: {e}")
+        return jsonify({'error': 'Failed to assign lead'}), 500
+
+@app.route('/api/admin/leads/<int:lead_id>/status', methods=['PUT'])
+def update_lead_status(lead_id):
+    """Update lead status"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        # Check if user is admin
+        admin_check = execute_query("SELECT role FROM admins WHERE id = %s", (admin_id,), fetch_one=True)
+        if not admin_check or admin_check['role'] != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        data = request.get_json()
+        new_status = data.get('status')
+        
+        if not new_status:
+            return jsonify({'error': 'Status is required'}), 400
+        
+        # Update lead status
+        query = "UPDATE lead_generation_reports SET lead_status = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s"
+        execute_query(query, (new_status, lead_id))
+        
+        return jsonify({'success': True, 'message': 'Lead status updated successfully'})
+        
+    except Exception as e:
+        print(f"âŒ Error updating lead status: {e}")
+        return jsonify({'error': 'Failed to update lead status'}), 500
+
+@app.route('/api/admin/leads/<int:lead_id>', methods=['DELETE'])
+def delete_lead(lead_id):
+    """Delete a lead"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        # Check if user is admin
+        admin_check = execute_query("SELECT role FROM admins WHERE id = %s", (admin_id,), fetch_one=True)
+        if not admin_check or admin_check['role'] != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 403
+        
+        # Delete lead (cascade will handle assignments)
+        query = "DELETE FROM lead_generation_reports WHERE id = %s"
+        execute_query(query, (lead_id,))
+        
+        return jsonify({'success': True, 'message': 'Lead deleted successfully'})
+        
+    except Exception as e:
+        # print(f"âŒ Error deleting lead: {e}")
+        return jsonify({'error': 'Failed to delete lead'}), 500
+
+
+@app.route('/api/admin/employees', methods=['GET'])
+def get_admin_employees():
+    """Get all employees for admin dashboard"""
+    try:
+        admin_id = session.get('user_id')
+        user_type = session.get('user_type')
+        if not admin_id or user_type != 'admin':
+            return jsonify({'error': 'Not authenticated as admin'}), 403
+        
+        # Get all employees with department info
+        query = """
+        SELECT 
+            u.id, u.employee_id, u.name, u.email, u.designation,
+            u.phone, u.created_at
+        FROM users u
+        ORDER BY u.name
+        """
+        
+        employees = execute_query(query)
+        return jsonify(employees)
+        
+    except Exception as e:
+        print(f"âŒ Error getting employees: {e}")
+        return jsonify({'error': 'Failed to get employees'}), 500
+
+@app.route('/api/admin/employees/<employee_id>/details', methods=['GET'])
+def get_admin_employee_details_by_id(employee_id):
+    """Get employee details by employee_id for assignment verification"""
+    try:
+        admin_id = session.get('user_id')
+        user_type = session.get('user_type')
+        if not admin_id or user_type != 'admin':
+            return jsonify({'error': 'Not authenticated as admin'}), 403
+        
+        # Get employee details with manager info
+        query = """
+        SELECT 
+            u.id, u.employee_id, u.name, u.email, u.designation,
+            u.phone, u.created_at
+        FROM users u
+        WHERE u.employee_id = %s
+        """
+        
+        employee = execute_query(query, (employee_id,), fetch_one=True)
+        
+        if not employee:
+            return jsonify({'error': f'Employee with ID {employee_id} not found'}), 404
+        
+        return jsonify(employee)
+        
+    except Exception as e:
+        print(f"âŒ Error getting employee details: {e}")
+        return jsonify({'error': 'Failed to get employee details'}), 500
+
+
+# Company Management Endpoints
+@app.route('/api/admin/companies', methods=['GET'])
+def get_companies():
+    """Get all companies for admin"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        query = """
+        SELECT c.id, c.company_name, c.email, c.contact_person, c.phone, c.industry, c.website, c.status, c.email_type,
+               c.created_at, c.updated_at,
+               GROUP_CONCAT(DISTINCT se.email_type ORDER BY se.sent_at) as sent_email_types,
+               GROUP_CONCAT(DISTINCT se.status ORDER BY se.sent_at) as email_statuses
+        FROM companies c
+        LEFT JOIN scheduled_emails se ON c.id = se.company_id AND se.status = 'sent'
+        GROUP BY c.id
+        ORDER BY c.created_at DESC
+        """
+        
+        companies = execute_query(query)
+        return jsonify({'success': True, 'companies': companies})
+        
+    except Exception as e:
+        print(f"❌ Error getting companies: {e}")
+        return jsonify({'error': 'Failed to get companies'}), 500
+
+
+@app.route('/api/admin/companies', methods=['POST'])
+def create_company():
+    """Create a new company"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        data = request.get_json()
+        company_name = data.get('company_name')
+        email = data.get('email')
+        contact_person = data.get('contact_person', '')
+        phone = data.get('phone', '')
+        industry = data.get('industry', '')
+        website = data.get('website', '')
+        email_type = data.get('email_type', 'intro')
+        
+        if not company_name or not email:
+            return jsonify({'error': 'Company name and email are required'}), 400
+        
+        query = """
+        INSERT INTO companies (company_name, email, contact_person, phone, industry, website, email_type)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """
+        
+        execute_query(query, (company_name, email, contact_person, phone, industry, website, email_type))
+        
+        return jsonify({'success': True, 'message': 'Company created successfully'})
+        
+    except Exception as e:
+        print(f"❌ Error creating company: {e}")
+        return jsonify({'error': 'Failed to create company'}), 500
+
+
+@app.route('/api/admin/companies/<int:company_id>', methods=['DELETE'])
+def delete_company(company_id):
+    """Delete a company"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        query = "DELETE FROM companies WHERE id = %s"
+        execute_query(query, (company_id,))
+        
+        return jsonify({'success': True, 'message': 'Company deleted successfully'})
+        
+    except Exception as e:
+        # print(f"❌ Error deleting company: {e}")
+        return jsonify({'error': 'Failed to delete company'}), 500
+
+
+# Email Scheduling Endpoints
+@app.route('/api/admin/scheduled-emails', methods=['GET'])
+def get_scheduled_emails():
+    """Get all scheduled emails"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # print(f"🔍 Debug: Getting scheduled emails for admin_id: {admin_id}")
+        
+        query = """
+        SELECT se.id, se.company_id, c.company_name, c.email, c.contact_person,
+               se.subject, se.email_body, se.scheduled_time, se.status, 
+               se.sent_at, se.error_message, se.created_at,
+               u.name as created_by_name
+        FROM scheduled_emails se
+        JOIN companies c ON se.company_id = c.id
+        LEFT JOIN users u ON se.created_by = u.id
+        ORDER BY se.scheduled_time DESC
+        """
+        
+        emails = execute_query(query)
+        # print(f"🔍 Debug: Found {len(emails) if emails else 0} scheduled emails")
+        
+        # Debug: Print first few scheduled times
+        if emails:
+            for i, email in enumerate(emails[:3]):
+                # print(f"🔍 Debug Email {i+1}: scheduled_time = {email['scheduled_time']}, type = {type(email['scheduled_time'])}")
+                pass
+        
+        return jsonify({'success': True, 'emails': emails})
+        
+    except Exception as e:
+        # print(f"❌ Error getting scheduled emails: {e}")
+        return jsonify({'error': 'Failed to get scheduled emails'}), 500
+
+
+@app.route('/api/admin/scheduled-emails', methods=['POST'])
+def schedule_email():
+    """Schedule an email to be sent"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        data = request.get_json()
+        company_id = data.get('company_id')
+        scheduled_time = data.get('scheduled_time')
+        email_type = data.get('email_type', 'intro')  # Get email_type from request, default to 'intro'
+        
+        if not company_id or not scheduled_time:
+            return jsonify({'error': 'Company ID and scheduled time are required'}), 400
+        
+        # Get company details
+        company_query = "SELECT company_name, email, contact_person, industry, email_type FROM companies WHERE id = %s"
+        company = execute_query(company_query, (company_id,), fetch_one=True)
+        
+        if not company:
+            return jsonify({'error': 'Company not found'}), 404
+        
+        # Check if admin_id exists in users table, if not use any existing user
+        user_check_query = "SELECT id FROM users WHERE id = %s"
+        user_exists = execute_query(user_check_query, (admin_id,), fetch_one=True)
+        
+        if not user_exists:
+            # If admin_id doesn't exist, find any user to use as created_by
+            any_user_query = "SELECT id FROM users LIMIT 1"
+            any_user = execute_query(any_user_query, fetch_one=True)
+            created_by_id = any_user['id'] if any_user else None
+        else:
+            created_by_id = admin_id
+        
+        if not created_by_id:
+            return jsonify({'error': 'No valid user found for email scheduling'}), 400
+        
+        # Generate email template based on selected email_type and company industry
+        template = get_email_template(
+            email_type,  # Use email_type from request instead of company's email_type
+            company['industry'], 
+            company['company_name'], 
+            company['contact_person']
+        )
+        
+        subject = template['subject']
+        email_body = template['body']
+        
+        query = """
+        INSERT INTO scheduled_emails (company_id, subject, email_body, scheduled_time, created_by, email_type)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """
+        
+        execute_query(query, (company_id, subject, email_body, scheduled_time, created_by_id, email_type))
+        
+        return jsonify({'success': True, 'message': 'Email scheduled successfully'})
+        
+    except Exception as e:
+        print(f"❌ Error scheduling email: {e}")
+        return jsonify({'error': 'Failed to schedule email'}), 500
+
+
+@app.route('/api/admin/scheduled-emails/<int:email_id>', methods=['DELETE'])
+def cancel_scheduled_email(email_id):
+    """Cancel a scheduled email"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        query = "UPDATE scheduled_emails SET status = 'cancelled' WHERE id = %s AND status = 'pending'"
+        execute_query(query, (email_id,))
+        
+        return jsonify({'success': True, 'message': 'Email cancelled successfully'})
+        
+    except Exception as e:
+        # print(f"❌ Error cancelling email: {e}")
+        return jsonify({'error': 'Failed to cancel email'}), 500
+
+
+@app.route('/api/admin/scheduled-emails/bulk', methods=['POST'])
+def schedule_bulk_emails():
+    """Schedule emails for multiple companies with batch processing"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        data = request.get_json()
+        company_ids = data.get('company_ids', [])
+        scheduled_time = data.get('scheduled_time')
+        batch_size = data.get('batch_size', 10)  # Default to 10 companies per batch
+        batch_interval = data.get('batch_interval', 10)  # Default to 10 minutes between batches
+        
+        if not company_ids or not scheduled_time:
+            return jsonify({'error': 'Company IDs and scheduled time are required'}), 400
+        
+        print(f"📧 Scheduling bulk emails: {len(company_ids)} companies, batch_size={batch_size}, interval={batch_interval} minutes")
+        
+        # Check if admin_id exists in users table, if not use any existing user
+        user_check_query = "SELECT id FROM users WHERE id = %s"
+        user_exists = execute_query(user_check_query, (admin_id,), fetch_one=True)
+        
+        if not user_exists:
+            any_user_query = "SELECT id FROM users LIMIT 1"
+            any_user = execute_query(any_user_query, fetch_one=True)
+            created_by_id = any_user['id'] if any_user else None
+        else:
+            created_by_id = admin_id
+        
+        if not created_by_id:
+            return jsonify({'error': 'No valid user found for email scheduling'}), 400
+        
+        # Get company details for all selected companies
+        placeholders = ','.join(['%s'] * len(company_ids))
+        companies_query = f"SELECT id, company_name, email, contact_person, industry, email_type FROM companies WHERE id IN ({placeholders})"
+        companies = execute_query(companies_query, company_ids)
+        
+        if not companies:
+            return jsonify({'error': 'No companies found'}), 404
+        
+        # Calculate batch scheduling
+        from datetime import datetime, timedelta
+        
+        # Parse the initial scheduled time and convert to UTC for storage
+        initial_time = datetime.fromisoformat(scheduled_time.replace('Z', ''))
+        
+        # Convert to UTC for consistent storage (assuming input is local time)
+        # This ensures the database stores times in UTC
+        initial_time = initial_time.replace(tzinfo=None)  # Remove timezone info for MySQL storage
+        
+        scheduled_count = 0
+        batch_number = 1
+        
+        # Process companies in batches
+        for i in range(0, len(companies), batch_size):
+            batch_companies = companies[i:i + batch_size]
+            
+            # Calculate scheduled time for this batch
+            if batch_number == 1:
+                batch_scheduled_time = initial_time
+            else:
+                # Add interval minutes for subsequent batches
+                batch_scheduled_time = initial_time + timedelta(minutes=(batch_number - 1) * batch_interval)
+            
+            print(f"📦 Batch {batch_number}: {len(batch_companies)} companies scheduled for {batch_scheduled_time}")
+            
+            # Schedule emails for each company in this batch
+            for company in batch_companies:
+                # Generate email template based on company's email_type and industry
+                template = get_email_template(
+                    company['email_type'], 
+                    company['industry'], 
+                    company['company_name'], 
+                    company['contact_person']
+                )
+                
+                subject = template['subject']
+                email_body = template['body']
+                
+                query = """
+                INSERT INTO scheduled_emails (company_id, subject, email_body, scheduled_time, created_by, email_type)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """
+                
+                execute_query(query, (company['id'], subject, email_body, batch_scheduled_time, created_by_id, company['email_type']))
+                scheduled_count += 1
+            
+            batch_number += 1
+        
+        total_batches = (len(companies) + batch_size - 1) // batch_size
+        total_duration = (total_batches - 1) * batch_interval if total_batches > 1 else 0
+        
+        return jsonify({
+            'success': True, 
+            'message': f'{scheduled_count} emails scheduled in {total_batches} batches over {total_duration} minutes',
+            'scheduled_count': scheduled_count,
+            'total_batches': total_batches,
+            'batch_size': batch_size,
+            'batch_interval': batch_interval,
+            'total_duration_minutes': total_duration
+        })
+        
+    except Exception as e:
+        print(f"❌ Error scheduling bulk emails: {e}")
+        return jsonify({'error': 'Failed to schedule bulk emails'}), 500
+
+
+@app.route('/api/admin/scheduled-emails/<int:email_id>/send-now', methods=['POST'])
+def send_email_now(email_id):
+    """Send a scheduled email immediately"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Get the scheduled email details
+        email_query = """
+        SELECT se.id, se.company_id, se.subject, se.email_body, se.scheduled_time,
+               c.company_name, c.email, c.contact_person
+        FROM scheduled_emails se
+        JOIN companies c ON se.company_id = c.id
+        WHERE se.id = %s AND se.status = 'pending'
+        """
+        
+        email_data = execute_query(email_query, (email_id,), fetch_one=True)
+        
+        if not email_data:
+            return jsonify({'error': 'Email not found or already sent'}), 404
+        
+        print(f"📧 Sending email to {email_data['company_name']} ({email_data['email']})")
+        
+        # Send actual email using SMTP
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = SMTP_USERNAME
+            msg['To'] = email_data['email']
+            msg['Subject'] = email_data['subject']
+            
+            # Add email body
+            msg.attach(MIMEText(email_data['email_body'], 'plain'))
+            
+            # Connect to SMTP server and send email
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            text = msg.as_string()
+            server.sendmail(SMTP_USERNAME, email_data['email'], text)
+            server.quit()
+            
+            print(f"✅ Email sent successfully to {email_data['email']}")
+            
+            # Mark as sent in database
+            update_query = """
+            UPDATE scheduled_emails 
+            SET status = 'sent', sent_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """
+            
+            execute_query(update_query, (email_id,))
+            
+            return jsonify({
+                'success': True, 
+                'message': f'Email sent successfully to {email_data["company_name"]} ({email_data["email"]})'
+            })
+            
+        except Exception as email_error:
+            print(f"❌ SMTP Error: {email_error}")
+            
+            # Mark as failed in database
+            update_query = """
+            UPDATE scheduled_emails 
+            SET status = 'failed', error_message = %s
+            WHERE id = %s
+            """
+            
+            execute_query(update_query, (str(email_error), email_id,))
+            
+            return jsonify({
+                'success': False, 
+                'message': f'Failed to send email: {str(email_error)}'
+            }), 500
+        
+    except Exception as e:
+        print(f"❌ Error sending email now: {e}")
+        return jsonify({'error': 'Failed to send email'}), 500
+
+
+@app.route('/api/admin/scheduled-emails/send-all-pending', methods=['POST'])
+def send_all_pending_emails():
+    """Send all pending emails immediately"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Get all pending emails
+        pending_query = """
+        SELECT se.id, se.company_id, se.subject, se.email_body,
+               c.company_name, c.email, c.contact_person
+        FROM scheduled_emails se
+        JOIN companies c ON se.company_id = c.id
+        WHERE se.status = 'pending'
+        """
+        
+        pending_emails = execute_query(pending_query)
+        
+        if not pending_emails:
+            return jsonify({'success': True, 'message': 'No pending emails to send'})
+        
+        print(f"📧 Sending {len(pending_emails)} pending emails...")
+        
+        sent_count = 0
+        failed_count = 0
+        failed_emails = []
+        
+        # Connect to SMTP server once for all emails
+        try:
+            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server.starttls()
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            
+            for email_data in pending_emails:
+                try:
+                    msg = MIMEMultipart()
+                    msg['From'] = SMTP_USERNAME
+                    msg['To'] = email_data['email']
+                    msg['Subject'] = email_data['subject']
+                    
+                    # Add email body
+                    msg.attach(MIMEText(email_data['email_body'], 'plain'))
+                    
+                    # Send email
+                    text = msg.as_string()
+                    server.sendmail(SMTP_USERNAME, email_data['email'], text)
+                    
+                    # Mark as sent in database
+                    update_query = """
+                    UPDATE scheduled_emails 
+                    SET status = 'sent', sent_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """
+                    
+                    execute_query(update_query, (email_data['id'],))
+                    
+                    sent_count += 1
+                    print(f"✅ Email sent to {email_data['company_name']} ({email_data['email']})")
+                    
+                except Exception as email_error:
+                    print(f"❌ Failed to send email to {email_data['email']}: {email_error}")
+                    
+                    # Mark as failed in database
+                    update_query = """
+                    UPDATE scheduled_emails 
+                    SET status = 'failed', error_message = %s
+                    WHERE id = %s
+                    """
+                    
+                    execute_query(update_query, (str(email_error), email_data['id'],))
+                    
+                    failed_count += 1
+                    failed_emails.append({
+                        'company': email_data['company_name'],
+                        'email': email_data['email'],
+                        'error': str(email_error)
+                    })
+            
+            server.quit()
+            
+            return jsonify({
+                'success': True, 
+                'message': f'Sent {sent_count} emails successfully, {failed_count} failed',
+                'sent_count': sent_count,
+                'failed_count': failed_count,
+                'failed_emails': failed_emails
+            })
+            
+        except Exception as smtp_error:
+            print(f"❌ SMTP Connection Error: {smtp_error}")
+            return jsonify({
+                'success': False, 
+                'message': f'Failed to connect to email server: {str(smtp_error)}'
+            }), 500
+        
+    except Exception as e:
+        print(f"❌ Error sending all pending emails: {e}")
+        return jsonify({'error': 'Failed to send emails'}), 500
+
+
+# Email threading functions
+def generate_message_id():
+    """Generate a unique Message-ID for email threading"""
+    domain = "yellowstonexps.com"
+    unique_id = str(uuid.uuid4())
+    return f"<{unique_id}@{domain}>"
+
+def get_previous_email_message_id(company_id, email_type):
+    """Get the Message-ID of the previous email sent to this company"""
+    try:
+        # Find the most recent email sent to this company
+        query = """
+        SELECT message_id, email_type, sent_at
+        FROM scheduled_emails 
+        WHERE company_id = %s AND status = 'sent' AND message_id IS NOT NULL
+        ORDER BY sent_at DESC
+        LIMIT 1
+        """
+        
+        result = execute_query(query, (company_id,))
+        if result and len(result) > 0:
+            return result[0]['message_id']
+        return None
+    except Exception as e:
+        # print(f"Error getting previous email Message-ID: {e}")
+        return None
+
+def get_email_thread_references(company_id):
+    """Get all Message-IDs in the email thread for this company"""
+    try:
+        query = """
+        SELECT message_id
+        FROM scheduled_emails 
+        WHERE company_id = %s AND status = 'sent' AND message_id IS NOT NULL
+        ORDER BY sent_at ASC
+        """
+        
+        results = execute_query(query, (company_id,))
+        if results:
+            return [row['message_id'] for row in results]
+        return []
+    except Exception as e:
+        # print(f"Error getting email thread references: {e}")
+        return []
+
+
+# Email template system
+def get_email_template(email_type, industry, company_name, contact_person):
+    """Generate email template based on email type and industry"""
+    
+    # Extract first name from contact person or company name
+    first_name = contact_person.split(' ')[0] if contact_person else company_name.split(' ')[0]
+    
+    # Industry-specific modifications
+    industry_context = ""
+    if industry.lower() in ['technology', 'it services', 'software']:
+        industry_context = "technology sector"
+    elif industry.lower() in ['healthcare', 'medical']:
+        industry_context = "healthcare industry"
+    elif industry.lower() in ['finance', 'banking', 'financial services']:
+        industry_context = "financial services sector"
+    elif industry.lower() in ['retail', 'ecommerce']:
+        industry_context = "retail and e-commerce"
+    elif industry.lower() in ['real estate', 'property']:
+        industry_context = "real estate sector"
+    else:
+        industry_context = "your industry"
+    
+    templates = {
+        'intro': {
+            'subject': 'Strengthening your digital presence across the Middle East',
+            'body': f"""Dear {first_name},
+
+Warm greetings from Yellowstone Xps.
+
+We specialize in helping enterprises across the Middle East enhance their digital marketing performance through data-driven strategies and ROI-focused campaigns.
+
+Our expertise covers:
+• Performance Marketing (Google, Meta, LinkedIn Ads)
+• SEO & Content Strategy
+• Social Media Growth & Branding
+• Lead Generation & Conversion Optimization
+
+We've supported multiple regional brands in improving online visibility, generating qualified leads, and scaling brand engagement.
+
+Would you be open to a short conversation to explore how we can support your digital goals?
+
+Thanks & Regards,
+Saloni Sharma | BDM | YellowStone XPs - The Digital Hub
+Contact: +91-6284951313 (Handphone) : +971-507054123 (WhatsApp)
+www.yellowstonexps.com | contact@yellowstonexps.com
+IT/ITES | Digital Services | Software Development"""
+        },
+        'first_followup': {
+            'subject': 'Re: Following up on your digital marketing initiatives',
+            'body': f"""Dear {first_name},
+
+Just following up on my previous note — I understand how busy schedules can get, but I wanted to reconnect regarding digital marketing support from Yellowstone Xps.
+
+We're currently helping several enterprise clients in the UAE and Saudi Arabia optimize their marketing spend and improve ROI through a blend of performance campaigns, social media, and automation tools.
+
+Would you like me to share a few success stories or campaign case studies from similar industries?
+
+Looking forward to your thoughts.
+
+Thanks & Regards,
+Saloni Sharma | BDM | YellowStone XPs - The Digital Hub
+Contact: +91-6284951313 (Handphone) : +971-507054123 (WhatsApp)
+www.yellowstonexps.com | contact@yellowstonexps.com
+IT/ITES | Digital Services | Software Development"""
+        },
+        'second_followup': {
+            'subject': 'Re: Achieving measurable ROI through digital marketing',
+            'body': f"""Dear {first_name},
+
+I hope you're doing well.
+
+I wanted to share some insights about how many enterprises we work with have overcome challenges in generating quality leads or tracking ROI across multiple channels - areas where our team's data-driven approach has brought significant improvements.
+
+At Yellowstone Xps, we focus on measurable growth - every campaign is optimized for performance, not just visibility.
+
+I thought it might be valuable to discuss how we can contribute to your digital objectives. Would you be available for a brief call in the coming days?
+
+Thanks & Regards,
+Saloni Sharma | BDM | YellowStone XPs - The Digital Hub
+Contact: +91-6284951313 (Handphone) : +971-507054123 (WhatsApp)
+www.yellowstonexps.com | contact@yellowstonexps.com
+IT/ITES | Digital Services | Software Development"""
+        },
+        'third_followup': {
+            'subject': 'Re: Your reliable partner for digital growth in the Middle East',
+            'body': f"""Dear {first_name},
+
+I hope this message finds you well.
+
+I wanted to share some thoughts about how having a strategic digital partner can help businesses scale faster and stay ahead of market trends, even when you have an in-house team or existing marketing vendors.
+
+At Yellowstone Xps, we bring a full-service digital approach - combining creative storytelling with analytical precision - to help our enterprise clients reach the right audience, at the right time.
+
+I'd be happy to share a short capability deck or client portfolio for your review if you're interested.
+
+Thanks & Regards,
+Saloni Sharma | BDM | YellowStone XPs - The Digital Hub
+Contact: +91-6284951313 (Handphone) : +971-507054123 (WhatsApp)
+www.yellowstonexps.com | contact@yellowstonexps.com
+IT/ITES | Digital Services | Software Development"""
+        },
+        'final_followup': {
+            'subject': 'Re: Staying connected for future digital initiatives',
+            'body': f"""Dear {first_name},
+
+I hope this message finds you well.
+
+I understand you may not have an immediate need for digital marketing support right now - and that's perfectly fine.
+
+At Yellowstone Xps, we regularly help enterprises across the Middle East plan and execute successful digital campaigns - from lead generation and SEO to full-scale performance marketing.
+
+I'd be happy to stay in touch and share occasional insights or success stories that could be relevant to your future marketing plans.
+
+Would it be alright if I kept you updated from time to time?
+
+Thanks & Regards,
+Saloni Sharma | BDM | YellowStone XPs - The Digital Hub
+Contact: +91-6284951313 (Handphone) : +971-507054123 (WhatsApp)
+www.yellowstonexps.com | contact@yellowstonexps.com
+IT/ITES | Digital Services | Software Development"""
+        }
+    }
+    
+    return templates.get(email_type, templates['intro'])
+
+# Background task to automatically send scheduled emails
+def check_and_send_scheduled_emails():
+    """Background task that checks for pending emails and sends them when their time arrives"""
+    while True:
+        try:
+            # print("🕐 Checking for scheduled emails to send...")
+            
+            # Get current time
+            now = datetime.now()
+            
+            # Find emails that should be sent (scheduled_time <= now and status = 'pending')
+            query = """
+            SELECT se.id, se.company_id, se.subject, se.email_body, se.scheduled_time,
+                   se.email_type, c.company_name, c.email, c.contact_person
+            FROM scheduled_emails se
+            JOIN companies c ON se.company_id = c.id
+            WHERE se.status = 'pending' AND se.scheduled_time <= %s
+            ORDER BY se.scheduled_time ASC
+            """
+            
+            emails_to_send = execute_query(query, (now,))
+            
+            if emails_to_send:
+                # print(f"📧 Found {len(emails_to_send)} emails ready to send")
+                
+                for email_data in emails_to_send:
+                    try:
+                        # print(f"📤 Sending email to {email_data['company_name']} ({email_data['email']})")
+                        
+                        # Generate unique Message-ID for this email
+                        message_id = generate_message_id()
+                        
+                        # Get previous email Message-ID for threading
+                        previous_message_id = get_previous_email_message_id(email_data['company_id'], email_data.get('email_type', 'intro'))
+                        
+                        # Get all Message-IDs in the thread for References header
+                        thread_references = get_email_thread_references(email_data['company_id'])
+                        
+                        # Send actual email using SMTP
+                        msg = MIMEMultipart()
+                        msg['From'] = SMTP_USERNAME
+                        msg['To'] = email_data['email']
+                        msg['Subject'] = email_data['subject']
+                        msg['Message-ID'] = message_id
+                        
+                        # Add threading headers for follow-up emails
+                        if previous_message_id:
+                            msg['In-Reply-To'] = previous_message_id
+                        
+                        if thread_references:
+                            # Add all previous Message-IDs to References header
+                            references_str = ' '.join(thread_references)
+                            msg['References'] = references_str
+                        
+                        # Add email body
+                        msg.attach(MIMEText(email_data['email_body'], 'plain'))
+                        
+                        # Connect to SMTP server and send email
+                        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+                        server.starttls()
+                        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                        text = msg.as_string()
+                        server.sendmail(SMTP_USERNAME, email_data['email'], text)
+                        server.quit()
+                        
+                        # print(f"✅ Email sent successfully to {email_data['email']}")
+                        
+                        # Mark as sent in database with Message-ID and threading info
+                        update_query = """
+                        UPDATE scheduled_emails 
+                        SET status = 'sent', sent_at = CURRENT_TIMESTAMP, 
+                            message_id = %s, in_reply_to = %s, references_header = %s
+                        WHERE id = %s
+                        """
+                        
+                        references_str = ' '.join(thread_references) if thread_references else None
+                        execute_query(update_query, (message_id, previous_message_id, references_str, email_data['id'],))
+                        
+                        # Emit WebSocket notification for real-time update
+                        socketio.emit('email_sent', {
+                            'email_id': email_data['id'],
+                            'company_name': email_data['company_name'],
+                            'status': 'sent',
+                            'sent_at': datetime.now().isoformat()
+                        }, room='admin')
+                        
+                    except Exception as email_error:
+                        # print(f"❌ SMTP Error sending to {email_data['email']}: {email_error}")
+                        
+                        # Mark as failed in database
+                        update_query = """
+                        UPDATE scheduled_emails 
+                        SET status = 'failed', error_message = %s
+                        WHERE id = %s
+                        """
+                        
+                        execute_query(update_query, (str(email_error), email_data['id'],))
+                        
+                        # Emit WebSocket notification for failed email
+                        socketio.emit('email_failed', {
+                            'email_id': email_data['id'],
+                            'company_name': email_data['company_name'],
+                            'status': 'failed',
+                            'error_message': str(email_error)
+                        }, room='admin')
+            else:
+                # print("📭 No emails ready to send")
+                pass
+                
+        except Exception as e:
+            # print(f"❌ Error in email scheduler: {e}")
+            pass
+        
+        # Wait 30 seconds before checking again
+        time.sleep(30)
+
+# Start the background email scheduler
+email_scheduler_thread = threading.Thread(target=check_and_send_scheduled_emails, daemon=True)
+email_scheduler_thread.start()
+# print("🚀 Email scheduler started - checking every 30 seconds")
 
 if __name__ == '__main__':
     print("Starting Flask server with WebSocket support...")

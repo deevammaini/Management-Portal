@@ -84,6 +84,14 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   const [uploadedReports, setUploadedReports] = useState([]);
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportsSearch, setReportsSearch] = useState('');
+  const [assignedLeads, setAssignedLeads] = useState([]);
+  const [assignedLeadsLoading, setAssignedLeadsLoading] = useState(false);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [selectedLeadAssignment, setSelectedLeadAssignment] = useState(null);
+  const [progressForm, setProgressForm] = useState({
+    status: '',
+    progress_notes: ''
+  });
   const [reportsPagination, setReportsPagination] = useState({
     page: 1,
     per_page: 10,
@@ -121,6 +129,13 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   useEffect(() => {
     if (activeTab === 'leadgeneration' && leadGenSubTab === 'reports') {
       loadUploadedReports();
+    }
+  }, [activeTab, leadGenSubTab]);
+
+  // Load assigned leads when assigned leads tab is active
+  useEffect(() => {
+    if (activeTab === 'leadgeneration' && leadGenSubTab === 'assigned') {
+      loadAssignedLeads();
     }
   }, [activeTab, leadGenSubTab]);
 
@@ -594,32 +609,6 @@ const EmployeeDashboard = ({ user, onLogout }) => {
     showNotification('Template downloaded successfully!', 'success');
   };
 
-  const testBackendStatus = async () => {
-    try {
-      showNotification('Testing backend status...', 'success');
-      
-      const response = await apiCall('/api/employee/test-lead-upload');
-      
-      console.log('Backend test response:', response);
-      
-      if (response.success) {
-        let message = 'Backend Status: ';
-        message += response.table_exists ? '✅ Table exists, ' : '❌ Table missing, ';
-        message += response.pandas_available ? '✅ Pandas available' : '❌ Pandas missing';
-        
-        if (!response.table_exists && response.table_error) {
-          message += `\nTable Error: ${response.table_error}`;
-        }
-        
-        showNotification(message, response.table_exists && response.pandas_available ? 'success' : 'error');
-      } else {
-        showNotification(`Backend test failed: ${response.error}`, 'error');
-      }
-    } catch (error) {
-      console.error('Backend test error:', error);
-      showNotification(`Backend test failed: ${error.message}`, 'error');
-    }
-  };
 
   // Button handlers for reports
   const handleViewReport = (report) => {
@@ -689,6 +678,46 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       showNotification('Failed to load reports', 'error');
     } finally {
       setReportsLoading(false);
+    }
+  };
+
+  const loadAssignedLeads = async () => {
+    try {
+      setAssignedLeadsLoading(true);
+      const response = await apiCall(`/api/employee/assigned-leads?employee_id=${user.id}`);
+      if (response && response.leads) {
+        setAssignedLeads(response.leads);
+      } else {
+        setAssignedLeads([]);
+      }
+    } catch (error) {
+      console.error('Error loading assigned leads:', error);
+      showNotification('Failed to load assigned leads', 'error');
+      setAssignedLeads([]);
+    } finally {
+      setAssignedLeadsLoading(false);
+    }
+  };
+
+  const handleUpdateProgress = async (e) => {
+    e.preventDefault();
+    try {
+      await apiCall(`/api/employee/leads/${selectedLeadAssignment.lead_assignment_id}/progress?employee_id=${user.id}`, {
+        method: 'POST',
+        body: JSON.stringify(progressForm)
+      });
+      
+      showNotification('Progress updated successfully!', 'success');
+      setShowProgressModal(false);
+      setSelectedLeadAssignment(null);
+      setProgressForm({
+        status: '',
+        progress_notes: ''
+      });
+      loadAssignedLeads();
+    } catch (error) {
+      console.error('Error updating progress:', error);
+      showNotification('Failed to update progress', 'error');
     }
   };
 
@@ -909,6 +938,21 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                   <button
                     onClick={() => {
                       setActiveTab('leadgeneration');
+                      setLeadGenSubTab('assigned');
+                      setSidebarOpen(false);
+                    }}
+                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
+                      activeTab === 'leadgeneration' && leadGenSubTab === 'assigned'
+                        ? 'bg-amber-50 text-amber-600 font-medium'
+                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                    }`}
+                  >
+                    <Target size={16} />
+                    Assigned Leads
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveTab('leadgeneration');
                       setLeadGenSubTab('reports');
                       setSidebarOpen(false);
                     }}
@@ -1018,6 +1062,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                     {activeTab === 'tickets' && 'My Tickets'}
                     {activeTab === 'leadgeneration' && (
                       leadGenSubTab === 'leads' ? 'Leads' :
+                      leadGenSubTab === 'assigned' ? 'Assigned Leads' :
                       leadGenSubTab === 'reports' ? 'Lead Reports' :
                       'Upload Report'
                     )}
@@ -1789,6 +1834,121 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                   </div>
                 )}
 
+                {/* Assigned Leads Sub-tab */}
+                {leadGenSubTab === 'assigned' && (
+                  <div className="p-6">
+                    <div className="flex items-center justify-between mb-6">
+                      <h3 className="text-lg font-semibold">My Assigned Leads</h3>
+                      <button 
+                        onClick={loadAssignedLeads}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2"
+                      >
+                        <RefreshCw size={18} />
+                        Refresh
+                      </button>
+                    </div>
+                    
+                    {assignedLeadsLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+                      </div>
+                    ) : assignedLeads.length === 0 ? (
+                      <div className="bg-gray-50 rounded-lg p-8 text-center">
+                        <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                        <h4 className="text-lg font-medium text-gray-900 mb-2">No Assigned Leads</h4>
+                        <p className="text-gray-500">You don't have any leads assigned to you yet</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {assignedLeads.map((lead) => (
+                          <div key={lead.lead_assignment_id} className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
+                            <div className="flex justify-between items-start mb-4">
+                              <div>
+                                <h4 className="text-lg font-semibold text-gray-900">{lead.company_name}</h4>
+                                <p className="text-gray-600">{lead.project_name || 'No project name'}</p>
+                                <p className="text-sm text-gray-500">{lead.client_email}</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                                  lead.status === 'new' ? 'bg-blue-100 text-blue-800' :
+                                  lead.status === 'contacted' ? 'bg-yellow-100 text-yellow-800' :
+                                  lead.status === 'qualified' ? 'bg-green-100 text-green-800' :
+                                  lead.status === 'proposal' ? 'bg-purple-100 text-purple-800' :
+                                  lead.status === 'negotiation' ? 'bg-orange-100 text-orange-800' :
+                                  lead.status === 'closed_won' ? 'bg-green-100 text-green-800' :
+                                  lead.status === 'closed_lost' ? 'bg-red-100 text-red-800' :
+                                  'bg-gray-100 text-gray-800'
+                                }`}>
+                                  {lead.status || lead.lead_status}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    setSelectedLeadAssignment(lead);
+                                    setProgressForm({
+                                      status: lead.status || lead.lead_status,
+                                      progress_notes: lead.progress_notes || ''
+                                    });
+                                    setShowProgressModal(true);
+                                  }}
+                                  className="px-3 py-1 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 transition-colors"
+                                >
+                                  Update Progress
+                                </button>
+                              </div>
+                            </div>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                              <div>
+                                <span className="font-medium text-gray-700">Location:</span>
+                                <p className="text-gray-600">{lead.location || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <span className="font-medium text-gray-700">Due Date:</span>
+                                <p className="text-gray-600">{lead.due_date ? new Date(lead.due_date).toLocaleDateString() : 'N/A'}</p>
+                              </div>
+                              <div>
+                                <span className="font-medium text-gray-700">Assigned:</span>
+                                <p className="text-gray-600">{new Date(lead.assigned_at).toLocaleDateString()}</p>
+                              </div>
+                            </div>
+                            
+                            {/* Assigner Information */}
+                            {lead.assigned_by_name && (
+                              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div className="flex items-center">
+                                  <User className="h-5 w-5 text-blue-600 mr-2" />
+                                  <div>
+                                    <span className="font-medium text-blue-800">Assigned by:</span>
+                                    <p className="text-sm text-blue-700">
+                                      {lead.assigned_by_name}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                            
+                            {lead.assignment_notes && (
+                              <div className="mt-4">
+                                <span className="font-medium text-gray-700">Assignment Notes:</span>
+                                <p className="text-gray-600 mt-1">{lead.assignment_notes}</p>
+                              </div>
+                            )}
+                            
+                            {/* Progress Information */}
+                            {lead.progress_notes && (
+                              <div className="mt-4">
+                                <span className="font-medium text-gray-700">Progress Notes:</span>
+                                <p className="text-gray-600 mt-1">{lead.progress_notes}</p>
+                              </div>
+                            )}
+                            
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Reports Sub-tab */}
                 {leadGenSubTab === 'reports' && (
                   <div className="p-6">
@@ -2013,13 +2173,6 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                         >
                           <Download size={18} />
                           Download Report Template
-                        </button>
-                        <button 
-                          onClick={testBackendStatus}
-                          className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 flex items-center gap-2"
-                        >
-                          <Database size={18} />
-                          Test Backend Status
                         </button>
                       </div>
                     </div>
@@ -2767,6 +2920,80 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Progress Update Modal */}
+        {showProgressModal && selectedLeadAssignment && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+              <div className="p-6 border-b">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-semibold">Update Lead Progress</h3>
+                  <button
+                    onClick={() => setShowProgressModal(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X size={24} />
+                  </button>
+                </div>
+                <p className="text-sm text-gray-600 mt-2">
+                  {selectedLeadAssignment.company_name} - {selectedLeadAssignment.project_name}
+                </p>
+              </div>
+              
+              <form onSubmit={handleUpdateProgress} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Status *
+                  </label>
+                  <select
+                    required
+                    value={progressForm.status}
+                    onChange={(e) => setProgressForm({...progressForm, status: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Select Status</option>
+                    <option value="new">New</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="qualified">Qualified</option>
+                    <option value="proposal">Proposal</option>
+                    <option value="negotiation">Negotiation</option>
+                    <option value="closed_won">Closed Won</option>
+                    <option value="closed_lost">Closed Lost</option>
+                  </select>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Progress Notes
+                  </label>
+                  <textarea
+                    value={progressForm.progress_notes}
+                    onChange={(e) => setProgressForm({...progressForm, progress_notes: e.target.value})}
+                    rows={3}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Describe what happened in this interaction..."
+                  />
+                </div>
+                
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowProgressModal(false)}
+                    className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                  >
+                    Update Progress
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
