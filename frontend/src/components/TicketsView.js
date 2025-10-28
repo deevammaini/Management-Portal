@@ -59,18 +59,19 @@ const TicketsView = ({ showNotification }) => {
 
   const handleSalaryCodeChange = (salaryCode) => {
     if (salaryCode && employees.length > 0) {
-      const employee = employees.find(emp => emp.employeeId === salaryCode);
+      const code = String(salaryCode).trim();
+      const employee = employees.find(emp => String(emp.employeeId || emp.employee_id).trim() === code);
       if (employee) {
         setTicketForm(prev => ({
           ...prev,
-          salary_code: salaryCode,
+          salary_code: code,
           assigned_to_type: 'employee',
           assigned_to_id: employee.id
         }));
       } else {
         setTicketForm(prev => ({
           ...prev,
-          salary_code: salaryCode,
+          salary_code: code,
           assigned_to_type: '',
           assigned_to_id: ''
         }));
