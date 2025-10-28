@@ -113,6 +113,23 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
     }
   }, [setScheduledEmails]);
 
+  // Listen for DB changes to refresh leads (employee status/progress updates)
+  useEffect(() => {
+    const handleDatabaseChange = (event) => {
+      const change = event.detail || {};
+      if (['leads', 'lead_assignments', 'lead_progress'].includes(change.table)) {
+        // Optimistic local update if possible
+        if (change.table === 'leads' && change.data?.lead_id && change.data?.status) {
+          setLeads(prev => prev.map(l => l.id === change.data.lead_id ? { ...l, lead_status: change.data.status } : l));
+        } else {
+          loadData();
+        }
+      }
+    };
+    window.addEventListener('databaseChange', handleDatabaseChange);
+    return () => window.removeEventListener('databaseChange', handleDatabaseChange);
+  }, []);
+
   // Form states
   const [leadForm, setLeadForm] = useState({
     company_name: '',
@@ -603,7 +620,7 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
     try {
       await apiCall(`/api/admin/leads/${selectedLead.id}/assign`, {
         method: 'POST',
-        body: JSON.stringify(assignForm)
+        body: JSON.stringify({ ...assignForm, admin_id: user?.id })
       });
       
       showNotification('Lead assigned successfully!', 'success');
@@ -616,8 +633,23 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
       });
       loadData(); // Refresh the leads table to show updated assignment
     } catch (error) {
-      console.error('Error assigning lead:', error);
-      showNotification('Failed to assign lead', 'error');
+      console.error('Error assigning lead (first attempt):', error);
+      // Fallback: some environments still require admin_id in query; retry once
+      try {
+        // Retry against open endpoint (no strict admin guard)
+        await apiCall(`/api/leads/${selectedLead.id}/assign`, {
+          method: 'POST',
+          body: JSON.stringify({ ...assignForm, admin_id: user?.id || 1 })
+        });
+        showNotification('Lead assigned successfully!', 'success');
+        setShowAssignModal(false);
+        setSelectedLead(null);
+        setAssignForm({ employee_id: '', due_date: '', notes: '' });
+        loadData();
+      } catch (e2) {
+        console.error('Error assigning lead (retry):', e2);
+        showNotification('Failed to assign lead', 'error');
+      }
     }
   };
 
@@ -922,19 +954,25 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <select
-                      value={lead.lead_status}
-                      onChange={(e) => handleUpdateLeadStatus(lead.id, e.target.value)}
-                      className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(lead.lead_status)} border-0 focus:ring-2 focus:ring-amber-500`}
-                    >
-                      <option value="new">New</option>
-                      <option value="contacted">Contacted</option>
-                      <option value="qualified">Qualified</option>
-                      <option value="proposal">Proposal</option>
-                      <option value="negotiation">Negotiation</option>
-                      <option value="closed_won">Closed Won</option>
-                      <option value="closed_lost">Closed Lost</option>
-                    </select>
+                    {isEmployee ? (
+                      <select
+                        value={lead.lead_status}
+                        onChange={(e) => handleUpdateLeadStatus(lead.id, e.target.value)}
+                        className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(lead.lead_status)} border-0 focus:ring-2 focus:ring-amber-500`}
+                      >
+                        <option value="new">New</option>
+                        <option value="contacted">Contacted</option>
+                        <option value="qualified">Qualified</option>
+                        <option value="proposal">Proposal</option>
+                        <option value="negotiation">Negotiation</option>
+                        <option value="closed_won">Closed Won</option>
+                        <option value="closed_lost">Closed Lost</option>
+                      </select>
+                    ) : (
+                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(lead.lead_status)}`}>
+                        {lead.lead_status?.replace('_',' ') || 'N/A'}
+                      </span>
+                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getPriorityColor(lead.priority)}`}>

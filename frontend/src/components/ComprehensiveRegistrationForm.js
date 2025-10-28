@@ -179,6 +179,20 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit }) => {
     { id: 'bank-supplier', title: 'Supplier Bank Details', icon: CreditCard }
   ];
 
+  // Lightweight section completion (for sidebar badges)
+  const isSectionComplete = (idx) => {
+    switch (idx) {
+      case 0: return !!formData.companyName && !!formData.companyType;
+      case 1: return !!formData.contactPersonName && !!formData.contactPersonDesignation;
+      case 2: return !!formData.communicationAddress;
+      case 3: return !!formData.emailAddress && !!formData.phoneNumber;
+      case 4: return !!formData.natureOfBusiness && !!formData.yearOfEstablishment;
+      case 5: return !!formData.bankName && !!formData.accountNumber && !!formData.ifscCode;
+      case 14: return !!formData.declaration1 && !!formData.declaration2;
+      default: return false;
+    }
+  };
+
   const renderCompanyDetails = () => (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -708,119 +722,104 @@ const ComprehensiveRegistrationForm = ({ isOpen, onClose, onSubmit }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
+    <div className="fixed inset-0 bg-gradient-to-br from-blue-900/40 via-indigo-900/40 to-purple-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-[92vh] overflow-hidden border border-gray-100">
         {/* Header */}
-        <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white p-6">
+        <div className="bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white p-6">
           <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold">Vendor Registration Form</h2>
-            <button
-              type="button"
-              onClick={onClose}
-              className="text-white hover:text-gray-200 transition-colors"
-            >
+            <div>
+              <h2 className="text-2xl font-bold">Vendor Registration</h2>
+              <p className="text-blue-100/90 mt-1 text-sm">Complete all sections to request full portal access</p>
+            </div>
+            <button type="button" onClick={onClose} className="text-white/90 hover:text-white transition-colors">
               <X size={24} />
             </button>
           </div>
-          <p className="text-amber-100 mt-2">Complete all sections for vendor registration approval</p>
         </div>
 
-        {/* Progress Bar */}
-        <div className="bg-gray-100 p-4">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-gray-700">
-              Section {currentSection + 1} of {sections.length}
-            </span>
-            <span className="text-sm text-gray-500">
-              {Math.round(((currentSection + 1) / sections.length) * 100)}% Complete
-            </span>
-          </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div
-              className="bg-gradient-to-r from-amber-500 to-orange-500 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${((currentSection + 1) / sections.length) * 100}%` }}
-            ></div>
-          </div>
-        </div>
-
-        {/* Section Navigation */}
-        <div className="bg-white border-b border-gray-200 p-4">
-          <div className="flex items-center space-x-2 overflow-x-auto">
-            {sections.map((section, index) => {
-              const Icon = section.icon;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  onClick={() => setCurrentSection(index)}
-                  className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                    index === currentSection
-                      ? 'bg-amber-100 text-amber-700 border border-amber-300'
-                      : index < currentSection
-                      ? 'bg-green-100 text-green-700 border border-green-300'
-                      : 'bg-gray-100 text-gray-600 border border-gray-300 hover:bg-gray-200'
-                  }`}
-                >
-                  <Icon size={16} />
-                  <span>{section.title}</span>
-                </button>
-              );
-            })}
+        <div className="grid grid-cols-1 md:grid-cols-12">
+          {/* Sidebar - Steps */}
+          <aside className="md:col-span-4 lg:col-span-3 bg-gray-50 border-r p-4 overflow-y-auto max-h-[66vh]">
+            <div className="space-y-2">
+              {sections.map((s, i) => {
+                const Icon = s.icon;
+                const active = i === currentSection;
+                const done = i < currentSection || isSectionComplete(i);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => setCurrentSection(i)}
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-lg border text-left transition-colors ${
+                      active
+                        ? 'bg-blue-50 border-blue-200 text-blue-700'
+                        : done
+                        ? 'bg-green-50 border-green-200 text-green-700'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Icon size={16} />
+                      <span className="text-sm font-medium">{s.title}</span>
+                    </span>
+                    {done && (
+                      <span className="text-xs font-semibold px-2 py-0.5 bg-green-600 text-white rounded-full">Done</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
-          </div>
-
-        {/* Form Content */}
-        <div className="p-6 overflow-y-auto max-h-[50vh]">
-              <div className="mb-6">
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">
-              {sections[currentSection]?.title || 'Loading...'}
-            </h3>
-            <p className="text-gray-600">
-              Please fill in the required information for this section.
-                </p>
+            {/* Progress */}
+            <div className="mt-4">
+              <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
+                <span>Progress</span>
+                <span>{Math.round(((currentSection + 1) / sections.length) * 100)}%</span>
               </div>
-              {renderCurrentSection()}
+              <div className="h-2 bg-gray-200 rounded-full">
+                <div className="h-2 rounded-full bg-gradient-to-r from-blue-600 to-purple-600" style={{ width: `${((currentSection + 1) / sections.length) * 100}%` }} />
+              </div>
+            </div>
+          </aside>
+
+          {/* Content */}
+          <section className="md:col-span-8 lg:col-span-9 p-6 overflow-y-auto max-h-[66vh]">
+            <div className="mb-6">
+              <h3 className="text-xl font-semibold text-gray-900 mb-1">{sections[currentSection]?.title || 'Loading...'}</h3>
+              <p className="text-gray-600 text-sm">Please fill in the required information for this section.</p>
+            </div>
+            {renderCurrentSection()}
+          </section>
         </div>
 
         {/* Footer */}
-        <div className="bg-gray-50 px-6 py-4 flex justify-between items-center">
-                <button
+        <div className="bg-white border-t px-6 py-4 flex flex-col sm:flex-row gap-3 sm:gap-0 sm:justify-between items-center">
+          <button
             type="button"
             onClick={prevSection}
-                  disabled={currentSection === 0}
-            className="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  Previous
-                </button>
-          <div className="flex space-x-3">
-                  <button
-              type="button"
-                    onClick={onClose}
-              className="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  {currentSection === sections.length - 1 ? (
-                    <button
+            disabled={currentSection === 0}
+            className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Previous
+          </button>
+          <div className="flex gap-3">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50">Cancel</button>
+            {currentSection === sections.length - 1 ? (
+              <button
                 type="button"
-                      onClick={() => {
-                        console.log('Submitting form data:', formData);
-                        console.log('Phone number value:', formData.phoneNumber);
-                        onSubmit(formData);
-                      }}
-                className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all duration-200 font-medium"
-                    >
-                      Submit Registration
-                    </button>
-                  ) : (
-                    <button
+                onClick={() => onSubmit(formData)}
+                className="px-6 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 shadow"
+              >
+                Submit Registration
+              </button>
+            ) : (
+              <button
                 type="button"
-                      onClick={nextSection}
-                className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-all duration-200 font-medium"
-                    >
-                      Next
-                    </button>
-                  )}
+                onClick={nextSection}
+                className="px-6 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:via-indigo-700 hover:to-purple-700 shadow"
+              >
+                Next
+              </button>
+            )}
           </div>
         </div>
       </div>

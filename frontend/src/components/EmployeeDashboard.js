@@ -760,9 +760,9 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   const handleDeleteReport = async (reportId) => {
     if (window.confirm('Are you sure you want to delete this report and all its leads?')) {
       try {
-        const response = await apiCall(`/api/employee/uploaded-reports/${reportId}`, {
-          method: 'DELETE'
-        });
+        // Prefer fallback endpoint with query param to avoid CORS/path encoding issues
+        const deleteUrl = `/api/employee/uploaded-reports?id=${encodeURIComponent(reportId)}&employee_id=${user.id}`;
+        const response = await apiCall(deleteUrl, { method: 'DELETE' });
         
         if (response.success) {
           showNotification('Report deleted successfully', 'success');
@@ -800,7 +800,19 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       console.log('API Response:', response);
       
       if (response.success) {
-        setUploadedReports(response.reports);
+        // Normalize backend response to the UI shape
+        const normalized = (response.reports || []).map((r) => ({
+          id: r.id || r.report_id || r.uploaded_at || Math.random().toString(36).slice(2),
+          report_name: r.report_name || `Lead Report (${new Date(r.uploaded_at || Date.now()).toLocaleString()})`,
+          file_type: (r.file_type || 'xlsx'),
+          original_filename: r.original_filename || r.filename || 'Lead_Report.xlsx',
+          total_leads: r.total_leads || 0,
+          file_size: r.file_size || 0,
+          uploaded_at: r.uploaded_at || new Date().toISOString(),
+          uploaded_by_name: r.uploaded_by_name || (user?.name || 'Unknown'),
+          status: r.status || 'active'
+        }));
+        setUploadedReports(normalized);
         setReportsPagination(response.pagination);
         console.log('Reports loaded successfully:', response.reports);
         console.log('Pagination:', response.pagination);
@@ -2224,7 +2236,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                         
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                           {uploadedReports.map((report) => (
-                            <div key={report.id} className="relative group">
+                            <div key={report.id || report.uploaded_at} className="relative group">
                               <button
                                 onClick={() => handleViewReport(report)}
                                 className="w-full p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:shadow-md hover:border-blue-300 transition-all duration-200 text-left group-hover:bg-blue-50"
@@ -2234,12 +2246,12 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                                     {report.report_name}
                                   </h5>
                                   <span className="ml-2 px-2 py-1 text-xs font-semibold rounded-full flex-shrink-0 bg-blue-100 text-blue-800">
-                                    {report.file_type.toUpperCase()}
+                                    {(report.file_type || 'xlsx').toUpperCase()}
                                   </span>
                                 </div>
                                 
                                 <p className="text-xs text-gray-600 mb-1">
-                                  <strong>File:</strong> {report.original_filename}
+                                  <strong>File:</strong> {report.original_filename || 'Lead_Report.xlsx'}
                                 </p>
                                 
                                 <p className="text-xs text-gray-600 mb-1">
@@ -2247,7 +2259,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                                 </p>
                                 
                                 <p className="text-xs text-gray-600 mb-1">
-                                  <strong>Size:</strong> {(report.file_size / 1024).toFixed(1)} KB
+                                  <strong>Size:</strong> {report.file_size ? (report.file_size / 1024).toFixed(1) : '—'} KB
                                 </p>
                                 
                                 <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
