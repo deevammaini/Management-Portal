@@ -124,19 +124,106 @@ const NDAFormsView = ({ showNotification }) => {
     try {
       switch (action) {
         case 'download':
-          showNotification('Bulk download feature coming soon!', 'info');
+          // Download each selected form
+          for (const formId of selectedForms) {
+            const form = forms.find(f => f.id === formId);
+            if (form && form.reference_number) {
+              await handleDownloadNDA(form.reference_number);
+              // Small delay to prevent overwhelming the server
+              await new Promise(resolve => setTimeout(resolve, 500));
+            }
+          }
+          showNotification(`Downloaded ${selectedForms.length} NDA form(s)`, 'success');
+          setSelectedForms([]);
           break;
         case 'send':
-          showNotification('Bulk send feature coming soon!', 'info');
+          // Send reminders for selected forms
+          showNotification(`Sending reminders to ${selectedForms.length} vendor(s)...`, 'info');
+          let successCount = 0;
+          for (const formId of selectedForms) {
+            const form = forms.find(f => f.id === formId);
+            if (form && form.reference_number && form.email) {
+              try {
+                await handleSendCompletedNDA(form.reference_number);
+                successCount++;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              } catch (error) {
+                console.error('Error sending reminder:', error);
+              }
+            }
+          }
+          showNotification(`Reminders sent to ${successCount} vendor(s)`, 'success');
+          setSelectedForms([]);
           break;
         case 'export':
-          showNotification('Export feature coming soon!', 'info');
+          // Export selected forms to CSV
+          const csvData = selectedForms.map(formId => {
+            const form = forms.find(f => f.id === formId);
+            return form ? {
+              reference: form.reference_number,
+              company: form.company_name,
+              contact: form.contact_person,
+              email: form.email,
+              status: form.nda_status,
+              submitted: form.signed_date
+            } : null;
+          }).filter(Boolean);
+          
+          const csvContent = [
+            ['Reference', 'Company', 'Contact', 'Email', 'Status', 'Submitted Date'],
+            ...csvData.map(row => [
+              row.reference,
+              row.company,
+              row.contact,
+              row.email,
+              row.status,
+              row.submitted
+            ])
+          ].map(row => row.join(',')).join('\n');
+          
+          const blob = new Blob([csvContent], { type: 'text/csv' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `nda_export_${new Date().toISOString().split('T')[0]}.csv`;
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+          }, 100);
+          
+          showNotification(`Exported ${selectedForms.length} NDA form(s)`, 'success');
+          setSelectedForms([]);
           break;
         case 'delete':
-          showNotification('Bulk delete feature coming soon!', 'info');
+          // Delete selected forms (with confirmation)
+          if (window.confirm(`Are you sure you want to delete ${selectedForms.length} NDA form(s)? This action cannot be undone.`)) {
+            let deletedCount = 0;
+            for (const formId of selectedForms) {
+              const form = forms.find(f => f.id === formId);
+              if (form) {
+                try {
+                  const response = await apiCall(`/api/admin/nda-forms/${formId}`, {
+                    method: 'DELETE'
+                  });
+                  if (response.success) {
+                    deletedCount++;
+                  }
+                } catch (error) {
+                  console.error('Error deleting form:', error);
+                }
+              }
+            }
+            showNotification(`Deleted ${deletedCount} NDA form(s)`, 'success');
+            setSelectedForms([]);
+            loadForms(); // Reload the list
+          }
           break;
       }
     } catch (error) {
+      console.error('Bulk action error:', error);
       showNotification('Bulk action failed', 'error');
     }
   };

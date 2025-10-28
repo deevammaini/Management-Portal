@@ -265,6 +265,55 @@ CREATE TABLE IF NOT EXISTS lead_progress_updates (
     FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Create tenders table
+CREATE TABLE IF NOT EXISTS tenders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    tender_number VARCHAR(100) UNIQUE NOT NULL,
+    title VARCHAR(500) NOT NULL,
+    description TEXT,
+    tender_type ENUM('government', 'private') NOT NULL DEFAULT 'government',
+    category VARCHAR(255),
+    organization_name VARCHAR(255),
+    budget_amount DECIMAL(15, 2),
+    currency VARCHAR(10) DEFAULT 'INR',
+    published_date DATE,
+    submission_deadline DATE,
+    opening_date DATE,
+    status ENUM('draft', 'published', 'open', 'closed', 'awarded', 'cancelled') DEFAULT 'draft',
+    contact_person VARCHAR(255),
+    contact_email VARCHAR(255),
+    contact_phone VARCHAR(20),
+    location VARCHAR(255),
+    eligibility_criteria TEXT,
+    documents_required TEXT,
+    important_documents JSON,
+    created_by INT,
+    updated_by INT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_tender_type (tender_type),
+    INDEX idx_status (status),
+    INDEX idx_published_date (published_date),
+    INDEX idx_submission_deadline (submission_deadline)
+);
+
+-- Create temporary vendor login credentials table
+CREATE TABLE IF NOT EXISTS temporary_vendor_logins (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    vendor_id INT NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE,
+    INDEX idx_vendor_id (vendor_id),
+    INDEX idx_email (email),
+    INDEX idx_expires_at (expires_at)
+);
+
 -- Add indexes for better performance
 CREATE INDEX idx_lead_assignments_employee ON lead_assignments(employee_id);
 CREATE INDEX idx_lead_assignments_status ON lead_assignments(status);

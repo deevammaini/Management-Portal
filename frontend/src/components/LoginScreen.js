@@ -8,6 +8,11 @@ const LoginScreen = ({ onLogin, onRegister }) => {
   const [credentials, setCredentials] = useState({ username: '', password: '', employeeId: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordData, setForgotPasswordData] = useState({ employeeId: '', newPassword: '', confirmPassword: '' });
+  const [forgotPasswordError, setForgotPasswordError] = useState('');
+  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState('');
+  const [forgotPasswordLoading, setForgotPasswordLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleLogin = async () => {
@@ -50,6 +55,53 @@ const LoginScreen = ({ onLogin, onRegister }) => {
       setError(err.message || 'Login failed. Please check your credentials.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setForgotPasswordError('');
+    setForgotPasswordSuccess('');
+    
+    if (!forgotPasswordData.employeeId || !forgotPasswordData.newPassword || !forgotPasswordData.confirmPassword) {
+      setForgotPasswordError('All fields are required');
+      return;
+    }
+    
+    if (forgotPasswordData.newPassword !== forgotPasswordData.confirmPassword) {
+      setForgotPasswordError('Passwords do not match');
+      return;
+    }
+    
+    if (forgotPasswordData.newPassword.length < 6) {
+      setForgotPasswordError('Password must be at least 6 characters long');
+      return;
+    }
+    
+    setForgotPasswordLoading(true);
+    
+    try {
+      const response = await apiCall('/api/auth/employee-forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          employee_id: forgotPasswordData.employeeId,
+          new_password: forgotPasswordData.newPassword
+        })
+      });
+      
+      if (response.success) {
+        setForgotPasswordSuccess('Password reset successfully! You can now login with your new password.');
+        setTimeout(() => {
+          setShowForgotPassword(false);
+          setForgotPasswordData({ employeeId: '', newPassword: '', confirmPassword: '' });
+        }, 2000);
+      } else {
+        setForgotPasswordError(response.message || 'Failed to reset password');
+      }
+    } catch (err) {
+      console.error('Forgot password error:', err);
+      setForgotPasswordError('Failed to reset password. Please try again.');
+    } finally {
+      setForgotPasswordLoading(false);
     }
   };
 
@@ -132,7 +184,17 @@ const LoginScreen = ({ onLogin, onRegister }) => {
 
             {userType !== 'vendor' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm font-medium text-gray-700">Password</label>
+                  {userType === 'employee' && (
+                    <button
+                      onClick={() => setShowForgotPassword(true)}
+                      className="text-sm text-amber-600 hover:text-amber-700 font-medium"
+                    >
+                      Forgot Password?
+                    </button>
+                  )}
+                </div>
                 <input
                   type="password"
                   value={credentials.password}
@@ -194,6 +256,87 @@ const LoginScreen = ({ onLogin, onRegister }) => {
           </div>
         </div>
       </div>
+
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full">
+            <div className="p-6 border-b">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold text-gray-900">Reset Password</h2>
+                <button
+                  onClick={() => {
+                    setShowForgotPassword(false);
+                    setForgotPasswordData({ employeeId: '', newPassword: '', confirmPassword: '' });
+                    setForgotPasswordError('');
+                    setForgotPasswordSuccess('');
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              {forgotPasswordError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                  {forgotPasswordError}
+                </div>
+              )}
+
+              {forgotPasswordSuccess && (
+                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">
+                  {forgotPasswordSuccess}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Employee ID</label>
+                  <input
+                    type="text"
+                    value={forgotPasswordData.employeeId}
+                    onChange={(e) => setForgotPasswordData({...forgotPasswordData, employeeId: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="Enter your employee ID"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">New Password</label>
+                  <input
+                    type="password"
+                    value={forgotPasswordData.newPassword}
+                    onChange={(e) => setForgotPasswordData({...forgotPasswordData, newPassword: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="Enter new password"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password</label>
+                  <input
+                    type="password"
+                    value={forgotPasswordData.confirmPassword}
+                    onChange={(e) => setForgotPasswordData({...forgotPasswordData, confirmPassword: e.target.value})}
+                    className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    placeholder="Confirm new password"
+                  />
+                </div>
+
+                <button
+                  onClick={handleForgotPassword}
+                  disabled={forgotPasswordLoading}
+                  className="w-full mt-6 py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white rounded-lg font-medium hover:from-amber-600 hover:to-orange-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {forgotPasswordLoading ? 'Resetting...' : 'Reset Password'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

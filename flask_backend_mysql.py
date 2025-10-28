@@ -52,10 +52,10 @@ except ImportError:
         'collation': 'utf8mb4_unicode_ci'
     }
     SMTP_SERVER = 'smtp.gmail.com'
-    SMTP_PORT = 587
-    SMTP_USERNAME = 'deevam.maini0412@gmail.com'
-    SMTP_PASSWORD = 'kukv vgal lsif cuhn'
-    ADMIN_EMAIL = 'deevam.maini0412@gmail.com'
+    SMTP_PORT = 465
+    SMTP_USERNAME = 'connect@yellowstonexperiences.com'
+    SMTP_PASSWORD = 'Connect@2025'
+    ADMIN_EMAIL = 'connect@yellowstonexperiences.com'
 
 app = Flask(__name__)
 CORS(app, 
@@ -129,6 +129,69 @@ def generate_vendor_password():
     password = ''.join(secrets.choice(characters) for _ in range(password_length))
     return password
 
+def load_smtp_settings_from_db():
+    """Load SMTP settings from database and update global variables"""
+    global SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+    try:
+        query = """
+        SELECT setting_key, setting_value
+        FROM system_settings
+        WHERE setting_category = 'email' AND setting_key IN ('smtp_server', 'smtp_port', 'smtp_username', 'smtp_password')
+        """
+        settings = execute_query(query, fetch_all=True)
+        
+        for setting in settings:
+            key = setting['setting_key']
+            value = setting['setting_value']
+            
+            if key == 'smtp_server':
+                SMTP_SERVER = value if value else 'smtp.gmail.com'
+            elif key == 'smtp_port':
+                SMTP_PORT = int(value) if value else 587
+            elif key == 'smtp_username':
+                SMTP_USERNAME = value if value else ''
+            elif key == 'smtp_password':
+                SMTP_PASSWORD = value if value else ''
+        
+        # print(f"✅ SMTP settings loaded from database: {SMTP_USERNAME}")
+    except Exception as e:
+        # print(f"⚠️ Could not load SMTP settings from database, using defaults: {e}")
+        # Use existing hardcoded values as fallback
+        pass
+
+def get_smtp_settings():
+    """Get current SMTP settings (returns database values or fallback to globals)"""
+    try:
+        query = """
+        SELECT setting_key, setting_value
+        FROM system_settings
+        WHERE setting_category = 'email' AND setting_key IN ('smtp_server', 'smtp_port', 'smtp_username', 'smtp_password', 'from_name', 'reply_to')
+        """
+        settings = execute_query(query, fetch_all=True)
+        
+        result = {}
+        for setting in settings:
+            result[setting['setting_key']] = setting['setting_value']
+        
+        return {
+            'smtp_server': result.get('smtp_server', SMTP_SERVER),
+            'smtp_port': int(result.get('smtp_port', SMTP_PORT)),
+            'smtp_username': result.get('smtp_username', SMTP_USERNAME),
+            'smtp_password': result.get('smtp_password', SMTP_PASSWORD),
+            'from_name': result.get('from_name', 'YellowStone XPs'),
+            'reply_to': result.get('reply_to', '')
+        }
+    except Exception as e:
+        # Return global values as fallback
+        return {
+            'smtp_server': SMTP_SERVER,
+            'smtp_port': SMTP_PORT,
+            'smtp_username': SMTP_USERNAME,
+            'smtp_password': SMTP_PASSWORD,
+            'from_name': 'YellowStone XPs',
+            'reply_to': ''
+        }
+
 # Database connection helper
 def get_db_connection():
     """Get MySQL database connection"""
@@ -171,9 +234,9 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
             connection.commit()
             return results if results else []
     except Error as e:
-        print(f"MySQL query error: {e}")
-        print(f"Query: {query}")
-        print(f"Params: {params}")
+        # print(f"MySQL query error: {e}")
+        # print(f"Query: {query}")
+        # print(f"Params: {params}")
         if fetch_all:
             return []
         return None
@@ -553,12 +616,15 @@ def temporary_login():
         email_normalized = email.strip().lower()
         print(f"[temporary-login] Attempt for email={email_normalized}")
         
+        # Query to get temporary login credentials
         query = """
-        SELECT tl.*, v.company_name as vendor_company, v.contact_person as vendor_contact, 
-               v.nda_status, v.reference_number
-        FROM temporary_logins tl 
-        JOIN vendors v ON tl.vendor_id = v.id 
-        WHERE LOWER(tl.email) = %s AND tl.is_active = 1 AND tl.expires_at > NOW()
+        SELECT tl.id, tl.vendor_id, tl.email, tl.password_hash, tl.company_name as vendor_company, 
+               tl.contact_person as vendor_contact, tl.reference_number,
+               tl.expires_at, tl.created_at
+        FROM temporary_logins tl
+        WHERE LOWER(tl.email) = %s AND tl.expires_at > NOW()
+        ORDER BY tl.created_at DESC
+        LIMIT 1
         """
         temp_login = execute_query(query, (email_normalized,), fetch_one=True)
         
@@ -570,8 +636,7 @@ def temporary_login():
             print(f"[temporary-login] Password mismatch for {email_normalized}")
             return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
         
-        update_query = "UPDATE temporary_logins SET used_at = NOW() WHERE id = %s"
-        execute_query(update_query, (temp_login['id'],))
+        print(f"[temporary-login] Successful login for {email_normalized}")
         
         return jsonify({
             'success': True,
@@ -582,7 +647,6 @@ def temporary_login():
                 'company': temp_login['vendor_company'],
                 'contact_person': temp_login['vendor_contact'],
                 'reference_number': temp_login['reference_number'],
-                'nda_status': temp_login['nda_status'],
                 'user_type': 'temp_vendor',
                 'is_temporary': True
             }
@@ -590,6 +654,8 @@ def temporary_login():
         
     except Exception as e:
         print(f"Temporary login error: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'success': False, 'message': 'Login failed'}), 500
 
 @app.route('/api/auth/vendor-login', methods=['POST'])
@@ -1663,6 +1729,64 @@ def register_vendor_detailed():
         
         print(f"Successfully inserted vendor registration for {company_name}")
         
+        # Send confirmation email to vendor
+        try:
+            smtp = get_smtp_settings()
+            msg = MIMEMultipart()
+            msg['From'] = f'YellowStone XPs <{smtp["smtp_username"]}>'
+            msg['To'] = email
+            msg['Subject'] = 'Vendor Registration Submitted - YellowStone XPs'
+            
+            # Add anti-spam headers
+            add_anti_spam_headers(msg, smtp)
+            
+            body = f"""Dear {contact_person},
+
+We have successfully received your vendor registration for {company_name}.
+
+REGISTRATION STATUS: COMPLETED ✓
+
+Your registration has been submitted and is now under review by our team.
+
+NEXT STEPS:
+- Our team will review your registration details
+- You will receive full portal access once approved
+- You will be notified via email when your portal access is activated
+- Expected review time: 3-5 business days
+
+IMPORTANT INFORMATION:
+- Company Name: {company_name}
+- Contact Person: {contact_person}
+- Email: {email}
+- Phone: {phone}
+- Registration Date: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
+
+If you have any questions or need to update your registration details, please contact our Vendor Relations Department.
+
+Thank you for your interest in partnering with YellowStone Xperiences Pvt Ltd.
+
+Best Regards,
+YellowStone Xperiences Pvt Ltd
+Harpreet Singh - CEO
+Email: Harpreet.singh@yellowstonexps.com
+Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India"""
+            
+            msg.attach(MIMEText(body, 'plain'))
+            
+            if smtp['smtp_port'] == 465:
+                server = smtplib.SMTP_SSL(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+            else:
+                server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+                server.starttls()
+            
+            server.login(smtp['smtp_username'], smtp['smtp_password'])
+            server.sendmail(smtp['smtp_username'], email, msg.as_string())
+            server.quit()
+            print(f"✅ Confirmation email sent to {email}")
+        except Exception as email_error:
+            print(f"⚠️ Failed to send confirmation email: {email_error}")
+            # Don't fail the registration if email fails
+        
         # Broadcast the new registration to connected clients
         broadcast_database_change('vendor_registrations', 'insert', {
             'company_name': company_name,
@@ -1751,38 +1875,60 @@ def approve_vendor_registration(registration_id):
         execute_query(update_query, (registration_id,))
         
         # Find vendor by email and update status
-        vendor_query = "SELECT id FROM vendors WHERE email = %s"
+        vendor_query = "SELECT id, email FROM vendors WHERE email = %s"
         vendor = execute_query(vendor_query, (registration['email'],), fetch_one=True)
         
         if vendor:
-            # Update vendor status to approved
-            vendor_update_query = "UPDATE vendors SET registration_status = 'approved', portal_access = 1 WHERE id = %s"
-            execute_query(vendor_update_query, (vendor['id'],))
+            print(f"✅ Found vendor ID: {vendor['id']} for email: {registration['email']}")
+            # Update vendor status AND company information to match registration
+            vendor_update_query = """
+            UPDATE vendors 
+            SET registration_status = 'approved', 
+                portal_access = 1,
+                company_name = %s,
+                contact_person = %s,
+                phone = %s,
+                address = %s,
+                updated_at = NOW()
+            WHERE id = %s
+            """
+            execute_query(vendor_update_query, (
+                registration['company_name'],
+                registration['contact_person'],
+                registration['phone'],
+                registration['address'],
+                vendor['id']
+            ))
+            print(f"✅ Updated vendor information for vendor_id: {vendor['id']}")
+            
+            # Use vendor's actual email from the vendors table, not from registration
+            vendor_email = vendor['email']
+            print(f"✅ Using vendor email: {vendor_email} for login creation")
             
             # Generate password for vendor login
             vendor_password = generate_vendor_password()
             password_hash = bcrypt.hashpw(vendor_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             
+            # DELETE any existing vendor_login records for this email to avoid confusion
+            delete_query = "DELETE FROM vendor_logins WHERE email = %s"
+            execute_query(delete_query, (vendor_email,))
+            print(f"✅ Deleted old vendor_login records for email: {vendor_email}")
+            
             # Create vendor login
             login_query = """
             INSERT INTO vendor_logins (vendor_id, email, password_hash, company_name, contact_person, phone, address)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE password_hash = %s, company_name = %s, contact_person = %s, phone = %s, address = %s
             """
             execute_query(login_query, (
                 vendor['id'],
-                registration['email'],
-                password_hash,
-                registration['company_name'],
-                registration['contact_person'],
-                registration['phone'],
-                registration['address'],
+                vendor_email,  # Use vendor's email from vendors table
                 password_hash,
                 registration['company_name'],
                 registration['contact_person'],
                 registration['phone'],
                 registration['address']
             ))
+            print(f"✅ Created vendor_login for vendor_id: {vendor['id']} with email: {vendor_email}")
         else:
             # Create new vendor if not found
             vendor_insert_query = """
@@ -1799,6 +1945,11 @@ def approve_vendor_registration(registration_id):
             vendor_password = generate_vendor_password()
             password_hash = bcrypt.hashpw(vendor_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             
+            # DELETE any existing vendor_login records for this email
+            delete_query = "DELETE FROM vendor_logins WHERE email = %s"
+            execute_query(delete_query, (registration['email'],))
+            print(f"✅ Deleted old vendor_login records for email: {registration['email']}")
+            
             # Create vendor login
             login_query = """
             INSERT INTO vendor_logins (vendor_id, email, password_hash, company_name, contact_person, phone, address)
@@ -1813,10 +1964,12 @@ def approve_vendor_registration(registration_id):
                 registration['phone'],
                 registration['address']
             ))
+            print(f"✅ Created new vendor with ID: {vendor_id}")
         
-        # Send credentials email to vendor
+        # Send credentials email to vendor using correct email
+        vendor_email_to_use = vendor['email'] if vendor else registration['email']
         email_sent = send_vendor_credentials_email(
-            registration['email'], 
+            vendor_email_to_use, 
             vendor_password, 
             registration['company_name']
         )
@@ -2952,23 +3105,38 @@ def delete_ticket(ticket_id):
 def submit_vendor_nda():
     """Submit vendor NDA with signature"""
     try:
-        data = request.get_json()
-        reference_number = data.get('reference_number')
-        signature_data = data.get('signature_data')
-        company_stamp_data = data.get('company_stamp_data', '')
-        signature_type = data.get('signature_type', 'draw')
-        contact_person = data.get('contact_person', '')
-        phone = data.get('phone', '')
-        address = data.get('address', '')
+        print(f"📝 Vendor NDA submission received")
+        print(f"📝 Form data keys: {list(request.form.keys())}")
         
-        if not reference_number or not signature_data:
+        # Handle FormData (multipart/form-data)
+        reference_number = request.form.get('reference_number')
+        signature = request.form.get('signature')
+        company_name = request.form.get('companyName')
+        contact_person = request.form.get('contactPerson')
+        email = request.form.get('email')
+        phone = request.form.get('phone')
+        address = request.form.get('address')
+        
+        print(f"📝 Reference: {reference_number}, Company: {company_name}, Email: {email}")
+        
+        # Handle file upload for stamp
+        stamp_file = request.files.get('stamp')
+        stamp_data = None
+        
+        if stamp_file and stamp_file.filename:
+            # Convert file to base64
+            import base64
+            stamp_data = base64.b64encode(stamp_file.read()).decode('utf-8')
+        
+        if not reference_number or not signature:
             return jsonify({'success': False, 'message': 'Reference number and signature are required'}), 400
         
+        # Update vendor record with all submitted information
         query = """
         UPDATE vendors 
         SET signature_data = %s, 
             company_stamp_data = %s, 
-            signature_type = %s,
+            company_name = %s,
             contact_person = %s,
             phone = %s,
             address = %s,
@@ -2977,13 +3145,65 @@ def submit_vendor_nda():
         WHERE reference_number = %s
         """
         
-        execute_query(query, (signature_data, company_stamp_data, signature_type, contact_person, phone, address, reference_number))
+        print(f"📝 Updating vendor record for reference: {reference_number}")
+        execute_query(query, (signature, stamp_data, company_name, contact_person, phone, address, reference_number))
+        print(f"✅ Vendor record updated successfully")
+        
+        # Send confirmation email to vendor
+        try:
+            smtp = get_smtp_settings()
+            print(f"📧 Sending confirmation email to {email}")
+            
+            msg = MIMEMultipart()
+            msg['From'] = f'YellowStone XPs <{smtp["smtp_username"]}>'
+            msg['To'] = email
+            msg['Subject'] = f'NDA Submission Confirmation - {reference_number}'
+            
+            # Add anti-spam headers
+            add_anti_spam_headers(msg, smtp)
+            
+            body = f"""Dear {contact_person},
+
+This is to confirm that we have successfully received your Non-Disclosure Agreement.
+
+Reference Number: {reference_number}
+Company Name: {company_name}
+Submitted Date: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
+
+Your NDA has been submitted and is now under review by our team. You will be notified once the review process is complete and your vendor portal access has been approved.
+
+Thank you for your interest in partnering with YellowStone Xperiences Pvt Ltd.
+
+Best Regards,
+YellowStone Xperiences Pvt Ltd
+Harpreet Singh - CEO
+Email: Harpreet.singh@yellowstonexps.com
+Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India"""
+            
+            msg.attach(MIMEText(body, 'plain'))
+            
+            if smtp['smtp_port'] == 465:
+                server = smtplib.SMTP_SSL(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+            else:
+                server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+                server.starttls()
+            
+            server.login(smtp['smtp_username'], smtp['smtp_password'])
+            text = msg.as_string()
+            server.sendmail(smtp['smtp_username'], email, text)
+            server.quit()
+            print(f"✅ Confirmation email sent to {email}")
+        except Exception as email_error:
+            print(f"⚠️ Failed to send confirmation email: {email_error}")
+            # Don't fail the NDA submission if email fails
         
         return jsonify({'success': True, 'message': 'NDA submitted successfully'})
         
     except Exception as e:
         print(f"Submit vendor NDA error: {e}")
-        return jsonify({'success': False, 'message': 'Failed to submit NDA'}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': f'Failed to submit NDA: {str(e)}'}), 500
 
 # Admin routes
 @app.route('/api/admin/nda-forms', methods=['GET'])
@@ -3044,6 +3264,37 @@ def get_admin_nda_forms():
     except Exception as e:
         return jsonify([])
 
+@app.route('/api/admin/nda-forms/<int:form_id>', methods=['DELETE'])
+def delete_nda_form(form_id):
+    """Delete an NDA form"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            # Check if user has employee access for NDA
+            employee_id = request.args.get('employee_id')
+            if not employee_id:
+                return jsonify({'error': 'Unauthorized'}), 401
+            
+            # Check if employee has NDA access
+            access_query = """
+            SELECT has_access FROM employee_access
+            WHERE employee_id = %s AND access_type = 'send_nda'
+            """
+            access = execute_query(access_query, (employee_id,), fetch_one=True)
+            
+            if not access or not bool(access.get('has_access', False)):
+                return jsonify({'error': 'No NDA access permission'}), 403
+        
+        # Delete the NDA form
+        query = "DELETE FROM nda_forms WHERE id = %s"
+        execute_query(query, (form_id,))
+        
+        return jsonify({'success': True, 'message': 'NDA form deleted successfully'})
+        
+    except Exception as e:
+        # print(f"Error deleting NDA form: {e}")
+        return jsonify({'error': 'Failed to delete NDA form'}), 500
+
 @app.route('/api/admin/vendors', methods=['GET'])
 def get_admin_vendors():
     """Get all vendors with proper error handling"""
@@ -3059,6 +3310,127 @@ def get_admin_vendors():
         
     except Exception as e:
         return jsonify([])
+
+@app.route('/api/admin/vendors/<int:vendor_id>/approve-portal-access', methods=['POST'])
+def approve_vendor_portal_access(vendor_id):
+    """Approve portal access for a vendor"""
+    try:
+        print(f"✅ Approving portal access for vendor ID: {vendor_id}")
+        
+        # Update vendor to grant portal access
+        update_query = """
+        UPDATE vendors 
+        SET portal_access = TRUE,
+            registration_status = 'approved',
+            updated_at = NOW()
+        WHERE id = %s
+        """
+        
+        result = execute_query(update_query, (vendor_id,))
+        print(f"✅ Vendor portal access updated")
+        
+        # Get vendor details for email
+        vendor_query = "SELECT company_name, email, contact_person FROM vendors WHERE id = %s"
+        vendor = execute_query(vendor_query, (vendor_id,), fetch_one=True)
+        
+        if vendor:
+            # Generate temporary password (8 characters, mix of letters and numbers)
+            import secrets
+            import string
+            
+            alphabet = string.ascii_letters + string.digits
+            temp_password = ''.join(secrets.choice(alphabet) for i in range(12))
+            
+            # Hash the password using bcrypt
+            hashed_password = bcrypt.hashpw(temp_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+            
+            # Calculate expiration date (30 days from now)
+            from datetime import datetime, timedelta
+            expires_at = datetime.now() + timedelta(days=30)
+            
+            # Insert temporary login credentials
+            print(f"✅ Creating temporary login credentials for vendor {vendor_id}")
+            
+            # First, deactivate any existing temporary logins for this vendor (if using is_active column)
+            # Note: If the table doesn't have is_active, you can DELETE old records instead:
+            # delete_query = "DELETE FROM temporary_logins WHERE vendor_id = %s"
+            # execute_query(delete_query, (vendor_id,))
+            
+            # Insert new temporary login
+            insert_query = """
+            INSERT INTO temporary_logins (vendor_id, email, password_hash, company_name, contact_person, reference_number, created_at, expires_at)
+            VALUES (%s, %s, %s, %s, %s, %s, NOW(), %s)
+            """
+            # Get vendor's reference number
+            vendor_details_query = "SELECT reference_number FROM vendors WHERE id = %s"
+            vendor_details = execute_query(vendor_details_query, (vendor_id,), fetch_one=True)
+            reference_number = vendor_details['reference_number'] if vendor_details else 'N/A'
+            
+            execute_query(insert_query, (vendor_id, vendor['email'], hashed_password, vendor['company_name'], vendor['contact_person'], reference_number, expires_at))
+            
+            print(f"✅ Temporary credentials created, expires: {expires_at}")
+            print(f"✅ Temporary password: {temp_password}")
+            
+            print(f"✅ Sending approval email to {vendor['email']}")
+            
+            # Send approval email
+            try:
+                smtp = get_smtp_settings()
+                msg = MIMEMultipart()
+                msg['From'] = smtp['smtp_username']
+                msg['To'] = vendor['email']
+                msg['Subject'] = 'Vendor Portal Access Approved - YellowStone XPs'
+                
+                body = f"""Dear {vendor['contact_person']},
+
+We are pleased to inform you that your vendor portal access has been approved!
+
+Company: {vendor['company_name']}
+Status: Portal Access Granted
+
+TEMPORARY LOGIN CREDENTIALS (Valid for 30 days):
+
+Username: {vendor['email']}
+Password: {temp_password}
+
+IMPORTANT:
+- These credentials will expire in 30 days
+- Please change your password after your first login
+- Use these credentials to access the vendor portal
+
+Portal URL: http://localhost:3000/vendor-portal
+
+If you have any questions, please contact our Vendor Relations Department.
+
+Thank you for partnering with YellowStone Xperiences Pvt Ltd.
+
+Best Regards,
+YellowStone Xperiences Pvt Ltd
+Harpreet Singh - CEO
+Email: Harpreet.singh@yellowstonexps.com"""
+                
+                msg.attach(MIMEText(body, 'plain'))
+                
+                if smtp['smtp_port'] == 465:
+                    server = smtplib.SMTP_SSL(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+                else:
+                    server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+                    server.starttls()
+                
+                server.login(smtp['smtp_username'], smtp['smtp_password'])
+                server.sendmail(smtp['smtp_username'], vendor['email'], msg.as_string())
+                server.quit()
+                print(f"✅ Approval email sent to {vendor['email']}")
+            except Exception as email_error:
+                print(f"⚠️ Failed to send approval email: {email_error}")
+        
+        return jsonify({'success': True, 'message': 'Portal access approved successfully'})
+        
+    except Exception as e:
+        print(f"❌ Error approving portal access: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'message': 'Failed to approve portal access'}), 500
 
 @app.route('/api/admin/templates', methods=['GET'])
 def get_admin_templates():
@@ -3204,13 +3576,163 @@ def get_submitted_nda_forms():
                v.signature_type, v.signed_date, v.created_at, v.updated_at
         FROM vendors v
         WHERE v.nda_status IN ('completed', 'sent')
-        ORDER BY v.created_at DESC
+        ORDER BY v.updated_at DESC
         """
         nda_forms = execute_query(query, fetch_all=True)
+        print(f"📊 Found {len(nda_forms) if nda_forms else 0} submitted NDA forms")
         return jsonify(nda_forms or [])
         
     except Exception as e:
+        print(f"❌ Error getting submitted NDA forms: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify([])
+
+@app.route('/api/admin/download-nda/<reference_number>', methods=['GET'])
+def download_nda_pdf(reference_number):
+    """Download NDA PDF by reference number"""
+    try:
+        # Get NDA form by reference number
+        query = """
+        SELECT nf.id, nf.form_data, nf.signed_at, nf.vendor_id
+        FROM nda_forms nf
+        WHERE JSON_UNQUOTE(JSON_EXTRACT(nf.form_data, '$.reference_number')) = %s
+        LIMIT 1
+        """
+        nda_form = execute_query(query, (reference_number,), fetch_one=True)
+        
+        if not nda_form:
+            return jsonify({'error': 'NDA not found'}), 404
+        
+        # Parse form data
+        form_data = {}
+        if nda_form['form_data']:
+            try:
+                form_data = json.loads(nda_form['form_data']) if isinstance(nda_form['form_data'], str) else nda_form['form_data']
+            except:
+                form_data = {}
+        
+        vendor_id = nda_form['vendor_id']
+        
+        # Get vendor data
+        vendor_query = """
+        SELECT company_name, contact_person, email, phone, address, 
+               business_type, reference_number, signature_type,
+               CASE WHEN signature_data IS NOT NULL AND signature_data != '' THEN 1 ELSE 0 END as has_signature,
+               CASE WHEN company_stamp_data IS NOT NULL AND company_stamp_data != '' THEN 1 ELSE 0 END as has_stamp
+        FROM vendors
+        WHERE id = %s
+        """
+        vendor_data = execute_query(vendor_query, (vendor_id,), fetch_one=True)
+        
+        if not vendor_data:
+            return jsonify({'error': 'Vendor not found'}), 404
+        
+        vendor_data['signed_date'] = nda_form['signed_at']
+        vendor_data['signature_data'] = bool(vendor_data.get('has_signature'))
+        vendor_data['company_stamp_data'] = bool(vendor_data.get('has_stamp'))
+        
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = []
+        
+        # Title
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=18,
+            spaceAfter=30,
+            alignment=1  # Center alignment
+        )
+        story.append(Paragraph("NON-DISCLOSURE AGREEMENT", title_style))
+        story.append(Spacer(1, 20))
+        
+        # Company Information
+        story.append(Paragraph("Company Information:", styles['Heading2']))
+        story.append(Spacer(1, 12))
+        
+        company_info = [
+            ['Company Name:', vendor_data['company_name'] or 'N/A'],
+            ['Contact Person:', vendor_data['contact_person'] or 'N/A'],
+            ['Email:', vendor_data['email'] or 'N/A'],
+            ['Phone:', vendor_data['phone'] or 'N/A'],
+            ['Address:', vendor_data['address'] or 'N/A'],
+            ['Business Type:', vendor_data['business_type'] or 'N/A'],
+            ['Reference Number:', vendor_data['reference_number'] or 'N/A'],
+            ['Signed Date:', vendor_data['signed_date'].strftime('%Y-%m-%d') if vendor_data.get('signed_date') else 'N/A']
+        ]
+        
+        company_table = Table(company_info, colWidths=[2*inch, 4*inch])
+        company_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(company_table)
+        story.append(Spacer(1, 20))
+        
+        # NDA Terms (simplified version)
+        story.append(Paragraph("Agreement Terms:", styles['Heading2']))
+        story.append(Spacer(1, 12))
+        
+        terms = [
+            "1. Confidential Information: The parties acknowledge that they may receive confidential and proprietary information.",
+            "2. Non-Disclosure: Each party agrees not to disclose confidential information to third parties.",
+            "3. Use Limitation: Confidential information shall only be used for the purpose of evaluating business opportunities.",
+            "4. Return of Information: Upon request, all confidential information shall be returned or destroyed.",
+            "5. Term: This agreement shall remain in effect for a period of 5 years from the date of signing.",
+            "6. Governing Law: This agreement shall be governed by the laws of the jurisdiction where YellowStone Group operates."
+        ]
+        
+        for term in terms:
+            story.append(Paragraph(term, styles['Normal']))
+            story.append(Spacer(1, 6))
+        
+        story.append(Spacer(1, 20))
+        
+        # Signature Section
+        story.append(Paragraph("Signatures:", styles['Heading2']))
+        story.append(Spacer(1, 12))
+        
+        signature_info = [
+            ['Signature Type:', vendor_data.get('signature_type', 'Digital') or 'Digital'],
+            ['Signature Present:', 'Yes' if vendor_data.get('signature_data') else 'No'],
+            ['Company Stamp Present:', 'Yes' if vendor_data.get('company_stamp_data') else 'No']
+        ]
+        
+        signature_table = Table(signature_info, colWidths=[2*inch, 4*inch])
+        signature_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        story.append(signature_table)
+        
+        doc.build(story)
+        buffer.seek(0)
+        
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'NDA_{reference_number}.pdf'
+        )
+        
+    except Exception as e:
+        # print(f"Error generating PDF: {e}")
+        return jsonify({'error': 'Failed to generate PDF'}), 500
 
 @app.route('/api/admin/send-completed-nda-email', methods=['POST'])
 def send_completed_nda_email():
@@ -3305,9 +3827,45 @@ def send_bulk_nda():
             print("âŒ No vendors selected")
             return jsonify({'success': False, 'message': 'No vendors selected'}), 400
         
-        results = []
-        for vendor in vendors:
+        # Process emails in background thread for immediate response
+        email_thread = threading.Thread(target=send_bulk_nda_background_worker, args=(vendors,))
+        email_thread.daemon = True
+        email_thread.start()
+        
+        # Return immediately - UI responds instantly
+        return jsonify({
+            'success': True, 
+            'message': f'Processing {len(vendors)} NDAs', 
+            'vendor_count': len(vendors)
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'message': 'Failed to process bulk NDA'}), 500
+
+def send_bulk_nda_background_worker(vendors):
+    """Background worker to send emails"""
+    try:
+        print(f"🔵 Bulk NDA worker started with {len(vendors)} vendors")
+        # Fetch current SMTP settings
+        smtp = get_smtp_settings()
+        print(f"🔵 SMTP Config: Server={smtp['smtp_server']}, Port={smtp['smtp_port']}, From={smtp['smtp_username']}")
+        
+        # Create single SMTP connection for all emails
+        if smtp['smtp_port'] == 465:
+            print("Using SSL connection for port 465...")
+            server = smtplib.SMTP_SSL(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+        else:
+            print(f"Using STARTTLS for port {smtp['smtp_port']}...")
+            server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+            server.starttls()
+        
+        print("Logging in...")
+        server.login(smtp['smtp_username'], smtp['smtp_password'])
+        print(f"✅ Logged in as {smtp['smtp_username']}")
+        
+        for i, vendor in enumerate(vendors, 1):
             try:
+                print(f"📧 Processing vendor {i}/{len(vendors)}: {vendor['email']}")
                 reference_number = generate_reference_number()
                 
                 # Update or create vendor record
@@ -3330,9 +3888,12 @@ def send_bulk_nda():
                 # Send email
                 try:
                     msg = MIMEMultipart()
-                    msg['From'] = SMTP_USERNAME
+                    msg['From'] = f'YellowStone XPs <{smtp["smtp_username"]}>'
                     msg['To'] = vendor['email']
                     msg['Subject'] = f"NDA Agreement Request - {vendor['company_name']} (Ref: {reference_number})"
+                    
+                    # Add anti-spam headers
+                    add_anti_spam_headers(msg, smtp)
                     
                     body = f"""
 Dear Sir/Madam,
@@ -3366,26 +3927,25 @@ YellowStone Xperiences Pvt Ltd
                     
                     msg.attach(MIMEText(body, 'plain'))
                     
-                    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-                    server.starttls()
-                    server.login(SMTP_USERNAME, SMTP_PASSWORD)
                     text = msg.as_string()
-                    server.sendmail(SMTP_USERNAME, vendor['email'], text)
-                    server.quit()
-                    
-                    results.append({'email': vendor['email'], 'status': 'success', 'reference': reference_number})
+                    print(f"  Sending email to {vendor['email']}...")
+                    server.sendmail(smtp['smtp_username'], vendor['email'], text)
+                    print(f"  ✅ Email sent to {vendor['email']}")
                     
                 except Exception as email_error:
-                    results.append({'email': vendor['email'], 'status': 'email_failed', 'reference': reference_number, 'error': str(email_error)})
+                    print(f"  ❌ Email failed for {vendor['email']}: {email_error}")
                     
             except Exception as vendor_error:
-                results.append({'email': vendor['email'], 'status': 'failed', 'error': str(vendor_error)})
+                print(f"  ❌ Vendor processing failed for {vendor.get('email', 'unknown')}: {vendor_error}")
         
-        return jsonify({'success': True, 'message': 'Bulk NDA processing completed', 'results': results})
+        # Close SMTP connection
+        server.quit()
+        print(f"✅ Bulk NDA sending completed for {len(vendors)} vendors")
         
     except Exception as e:
-        print(f"Send bulk NDA error: {e}")
-        return jsonify({'success': False, 'message': 'Failed to process bulk NDA'}), 500
+        print(f"❌ Bulk NDA worker failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 @app.route('/api/admin/notifications', methods=['GET'])
 def get_admin_notifications():
@@ -3530,6 +4090,57 @@ def google_form_webhook():
         print(f"âŒ Google Form webhook error: {e}")
         return jsonify({'success': False, 'message': 'Failed to process form submission'}), 500
 
+def get_smtp_settings():
+    """Fetch current SMTP settings from database"""
+    try:
+        query = """
+        SELECT setting_key, setting_value
+        FROM system_settings
+        WHERE setting_category = 'email' AND setting_key IN ('smtp_server', 'smtp_port', 'smtp_username', 'smtp_password', 'from_name')
+        """
+        settings = execute_query(query)
+        smtp_config = {}
+        for setting in settings:
+            smtp_config[setting['setting_key']] = setting['setting_value'].strip() if setting['setting_value'] else setting['setting_value']
+        
+        # Return with defaults if settings not found
+        return {
+            'smtp_server': smtp_config.get('smtp_server', SMTP_SERVER),
+            'smtp_port': int(smtp_config.get('smtp_port', SMTP_PORT)),
+            'smtp_username': smtp_config.get('smtp_username', SMTP_USERNAME),
+            'smtp_password': smtp_config.get('smtp_password', SMTP_PASSWORD),
+            'from_name': smtp_config.get('from_name', 'YellowStone XPs')
+        }
+    except Exception as e:
+        print(f"Error fetching SMTP settings: {e}")
+        return {
+            'smtp_server': SMTP_SERVER,
+            'smtp_port': SMTP_PORT,
+            'smtp_username': SMTP_USERNAME,
+            'smtp_password': SMTP_PASSWORD,
+            'from_name': 'YellowStone XPs'
+        }
+
+def add_anti_spam_headers(msg, smtp_config):
+    """Add anti-spam headers to email message to prevent emails from going to spam"""
+    try:
+        msg['List-Unsubscribe'] = '<https://yellowstonexperiences.com/unsubscribe>'
+        msg['List-Unsubscribe-Post'] = 'List-Unsubscribe=One-Click'
+        msg['X-Mailer'] = 'YellowStone XPs Management System'
+        msg['X-Priority'] = '3'
+        msg['X-MSMail-Priority'] = 'Normal'
+        msg['Importance'] = 'Normal'
+        # Add Message-ID for better deliverability
+        import uuid
+        msg['Message-ID'] = f'<{uuid.uuid4()}@yellowstonexperiences.com>'
+        msg['Return-Path'] = smtp_config.get('smtp_username', SMTP_USERNAME)
+        msg['Reply-To'] = smtp_config.get('smtp_username', SMTP_USERNAME)
+        # Add organization info
+        msg['Organization'] = 'YellowStone Xperiences Pvt Ltd'
+        msg['X-Complaints-To'] = smtp_config.get('smtp_username', SMTP_USERNAME)
+    except Exception as e:
+        print(f"Error adding anti-spam headers: {e}")
+
 @app.route('/api/admin/send-nda', methods=['POST'])
 def send_nda():
     """Send NDA to vendor with proper error handling"""
@@ -3570,10 +4181,16 @@ def send_nda():
         print(f"âœ… Vendor record saved successfully")
         
         try:
+            # Fetch current SMTP settings from database
+            smtp = get_smtp_settings()
+            
             msg = MIMEMultipart()
-            msg['From'] = SMTP_USERNAME
+            msg['From'] = f'YellowStone XPs <{smtp["smtp_username"]}>'
             msg['To'] = email
             msg['Subject'] = f"NDA Agreement Request - {company_name} (Ref: {reference_number})"
+            
+            # Add anti-spam headers
+            add_anti_spam_headers(msg, smtp)
             
             body = f"""
 Dear Sir/Madam,
@@ -3612,11 +4229,23 @@ Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India
             msg.attach(MIMEText(body, 'plain'))
             
             print(f"Attempting to send email to {email}")
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-            server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            print(f"SMTP Config: Server={smtp['smtp_server']}, Port={smtp['smtp_port']}, From={smtp['smtp_username']}")
+            
+            # Use port 587 or 465 based on configuration
+            if smtp['smtp_port'] == 465:
+                print("Using SSL connection for port 465...")
+                server = smtplib.SMTP_SSL(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+            else:
+                print(f"Using STARTTLS for port {smtp['smtp_port']}...")
+                server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+                server.starttls()
+            
+            print("Logging in...")
+            server.login(smtp['smtp_username'], smtp['smtp_password'])
+            print("Sending email...")
+            
             text = msg.as_string()
-            server.sendmail(SMTP_USERNAME, email, text)
+            server.sendmail(smtp['smtp_username'], email, text)
             server.quit()
             
             print(f"âœ… NDA email sent successfully to {email} with reference {reference_number}")
@@ -3729,40 +4358,54 @@ def handle_leave_room(data):
 def send_vendor_credentials_email(vendor_email, vendor_password, company_name):
     """Send vendor login credentials via email"""
     try:
+        smtp = get_smtp_settings()
         msg = MIMEMultipart()
-        msg['From'] = SMTP_USERNAME
+        msg['From'] = f'YellowStone XPs <{smtp["smtp_username"]}>'
         msg['To'] = vendor_email
         msg['Subject'] = "Your Vendor Portal Access - YellowStone XPs"
         
-        body = f"""
-Dear Vendor,
+        # Add anti-spam headers
+        add_anti_spam_headers(msg, smtp)
+        
+        body = f"""Dear Vendor,
 
 Congratulations! Your registration for {company_name} has been approved.
 
 You now have full access to the YellowStone XPs Vendor Portal.
 
-Your login credentials:
-Email: {vendor_email}
+LOGIN CREDENTIALS:
+
+Username: {vendor_email}
 Password: {vendor_password}
 
-Please log in at: http://localhost:3000/vendor-portal
+Portal URL: http://localhost:3000/vendor-portal
 
-Important Security Notes:
-- Please change your password after first login
+IMPORTANT SECURITY NOTES:
+- Please change your password after your first login
 - Keep your credentials secure
 - Contact support if you have any issues
+- Do not share your login credentials with anyone
+
+If you need assistance, please contact our Vendor Relations Department.
 
 Best regards,
-YellowStone XPs Management Team
+YellowStone Xperiences Pvt Ltd
+Harpreet Singh - CEO
+Email: Harpreet.singh@yellowstonexps.com
+Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India
         """
         
         msg.attach(MIMEText(body, 'plain'))
         
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-        server.starttls()
-        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        if smtp['smtp_port'] == 465:
+            server = smtplib.SMTP_SSL(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+        else:
+            server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+            server.starttls()
+        
+        server.login(smtp['smtp_username'], smtp['smtp_password'])
         text = msg.as_string()
-        server.sendmail(SMTP_USERNAME, vendor_email, text)
+        server.sendmail(smtp['smtp_username'], vendor_email, text)
         server.quit()
         
         print(f"âœ… Credentials email sent to {vendor_email}")
@@ -4239,24 +4882,24 @@ def upload_profile_picture():
 def upload_lead_report():
     """Upload lead report file and process it"""
     try:
-        print(f"Upload request received. Files: {list(request.files.keys())}")
-        print(f"Form data: {list(request.form.keys())}")
+        # print(f"Upload request received. Files: {list(request.files.keys())}")
+        # print(f"Form data: {list(request.form.keys())}")
         
         user_id = session.get('user_id')
         if not user_id:
-            print("No user_id in session")
+            # print("No user_id in session")
             return jsonify({'error': 'Not authenticated'}), 401
         
         if 'file' not in request.files:
-            print("No 'file' key in request.files")
+            # print("No 'file' key in request.files")
             return jsonify({'error': 'No file provided'}), 400
         
         file = request.files['file']
-        print(f"File details: name='{file.filename}', content_type='{file.content_type}', size={len(file.read())}")
+        # print(f"File details: name='{file.filename}', content_type='{file.content_type}', size={len(file.read())}")
         file.seek(0)  # Reset file pointer after reading
         
         if file.filename == '':
-            print("Empty filename")
+            # print("Empty filename")
             return jsonify({'error': 'No file selected'}), 400
         
         # Check file extension
@@ -4300,13 +4943,13 @@ def upload_lead_report():
         ]
         
         # Check if all required columns are present
-        print(f"Checking columns...")
-        print(f"Expected: {expected_columns}")
-        print(f"Found: {list(df.columns)}")
+        # print(f"Checking columns...")
+        # print(f"Expected: {expected_columns}")
+        # print(f"Found: {list(df.columns)}")
         
         missing_columns = [col for col in expected_columns if col not in df.columns]
         if missing_columns:
-            print(f"Missing columns: {missing_columns}")
+            # print(f"Missing columns: {missing_columns}")
             return jsonify({
                 'error': f'Missing required columns: {", ".join(missing_columns)}',
                 'expected_columns': expected_columns,
@@ -4314,7 +4957,7 @@ def upload_lead_report():
                 'missing_columns': missing_columns
             }), 400
         
-        print(f"All required columns present")
+        # print(f"All required columns present")
         
         # Process each row
         processed_count = 0
@@ -4377,23 +5020,23 @@ def upload_lead_report():
 @app.route('/api/employee/uploaded-reports', methods=['GET', 'OPTIONS'])
 def get_uploaded_reports():
     """Get all uploaded reports for the current user"""
-    print(f"Uploaded reports request: {request.method} - {request.url}")
+    # print(f"Uploaded reports request: {request.method} - {request.url}")
     
     if request.method == 'OPTIONS':
-        print("Handling OPTIONS request")
+        # print("Handling OPTIONS request")
         return '', 200
     
     try:
         # Get current user ID
         current_user_id = session.get('user_id')
-        print(f"Current user_id: {current_user_id}")
+        # print(f"Current user_id: {current_user_id}")
         
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         search = request.args.get('search', '', type=str)
         
-        print(f"Loading uploaded reports for user {current_user_id}, search: '{search}', page: {page}")
+        # print(f"Loading uploaded reports for user {current_user_id}, search: '{search}', page: {page}")
         
         # Build query to get uploaded reports with lead counts
         base_query = """
@@ -4425,19 +5068,19 @@ def get_uploaded_reports():
         offset = (page - 1) * per_page
         params.extend([per_page, offset])
         
-        print(f"Query: {base_query}")
-        print(f"Params: {params}")
+        # print(f"Query: {base_query}")
+        # print(f"Params: {params}")
         
         # Execute query
         try:
             reports = execute_query(base_query, params, fetch_all=True)
-            print(f"Query executed successfully, got {len(reports) if reports else 0} results")
+            # print(f"Query executed successfully, got {len(reports) if reports else 0} results")
             
             # Extract total count from first row if available
             total = reports[0]['total_count'] if reports and len(reports) > 0 else 0
             
         except Exception as e:
-            print(f"Error executing query: {e}")
+            # print(f"Error executing query: {e}")
             return jsonify({'error': f'Database error: {str(e)}'}), 500
         
         response_data = {
@@ -4451,33 +5094,33 @@ def get_uploaded_reports():
             }
         }
         
-        print(f"Returning response with {len(reports or [])} reports")
+        # print(f"Returning response with {len(reports or [])} reports")
         return jsonify(response_data)
         
     except Exception as e:
-        print(f"Get uploaded reports error: {e}")
+        # print(f"Get uploaded reports error: {e}")
         return jsonify({'error': 'Failed to fetch uploaded reports'}), 500
 
 @app.route('/api/employee/lead-reports', methods=['GET', 'OPTIONS'])
 def get_lead_reports():
     """Get all lead reports for the current user"""
-    print(f"Lead reports request: {request.method} - {request.url}")
+    # print(f"Lead reports request: {request.method} - {request.url}")
     
     if request.method == 'OPTIONS':
-        print("Handling OPTIONS request")
+        # print("Handling OPTIONS request")
         return '', 200
     
     try:
         # Get current user ID
         current_user_id = session.get('user_id')
-        print(f"Current user_id: {current_user_id}")
+        # print(f"Current user_id: {current_user_id}")
         
         # Get query parameters
         page = request.args.get('page', 1, type=int)
         per_page = request.args.get('per_page', 10, type=int)
         search = request.args.get('search', '', type=str)
         
-        print(f"Loading reports for user {current_user_id}, search: '{search}', page: {page}")
+        # print(f"Loading reports for user {current_user_id}, search: '{search}', page: {page}")
         
         # Build query - show all reports if current user has no reports, otherwise show user's reports
         base_query = """
@@ -4505,19 +5148,19 @@ def get_lead_reports():
         offset = (page - 1) * per_page
         params.extend([per_page, offset])
         
-        print(f"Single query: {base_query}")
-        print(f"Params: {params}")
+        # print(f"Single query: {base_query}")
+        # print(f"Params: {params}")
         
         # Execute single query
         try:
             reports = execute_query(base_query, params, fetch_all=True)
-            print(f"Query executed successfully, got {len(reports) if reports else 0} results")
+            # print(f"Query executed successfully, got {len(reports) if reports else 0} results")
             
             # Extract total count from first row if available
             total = reports[0]['total_count'] if reports and len(reports) > 0 else 0
             
         except Exception as e:
-            print(f"Error executing query: {e}")
+            # print(f"Error executing query: {e}")
             return jsonify({'error': f'Database error: {str(e)}'}), 500
         
         response_data = {
@@ -4531,11 +5174,11 @@ def get_lead_reports():
             }
         }
         
-        print(f"Returning response with {len(reports or [])} reports")
+        # print(f"Returning response with {len(reports or [])} reports")
         return jsonify(response_data)
         
     except Exception as e:
-        print(f"Get lead reports error: {e}")
+        # print(f"Get lead reports error: {e}")
         return jsonify({'error': 'Failed to fetch lead reports'}), 500
 
 @app.route('/api/test-table-exists', methods=['GET'])
@@ -4698,11 +5341,42 @@ def update_lead_progress(assignment_id):
         
         execute_query(update_query, (status, progress_notes, assignment_id, employee_id))
         
+        # Also insert into lead_progress_updates for tracking history
+        insert_progress_query = """
+        INSERT INTO lead_progress_updates (lead_assignment_id, employee_id, status, progress_notes)
+        VALUES (%s, %s, %s, %s)
+        """
+        execute_query(insert_progress_query, (assignment_id, employee_id, status, progress_notes))
+        
         return jsonify({'success': True, 'message': 'Lead progress updated successfully'})
         
     except Exception as e:
         print(f"âŒ Error updating lead progress: {e}")
         return jsonify({'error': 'Failed to update lead progress'}), 500
+
+@app.route('/api/admin/leads/<int:lead_id>/progress-updates', methods=['GET'])
+def get_lead_progress_updates(lead_id):
+    """Get progress updates for a specific lead"""
+    try:
+        query = """
+        SELECT 
+            lpu.*,
+            u.name as employee_name,
+            u.email as employee_email,
+            la.lead_id
+        FROM lead_progress_updates lpu
+        JOIN lead_assignments la ON lpu.lead_assignment_id = la.id
+        JOIN users u ON lpu.employee_id = u.id
+        WHERE la.lead_id = %s
+        ORDER BY lpu.created_at DESC
+        """
+        
+        updates = execute_query(query, (lead_id,), fetch_all=True)
+        return jsonify({'success': True, 'updates': updates or []})
+        
+    except Exception as e:
+        print(f"Error getting progress updates: {e}")
+        return jsonify({'success': False, 'updates': []})
 
 # ==================== LEAD MANAGEMENT ENDPOINTS ====================
 
@@ -4710,12 +5384,10 @@ def update_lead_progress(assignment_id):
 def get_admin_leads():
     """Get all leads for admin dashboard"""
     try:
-        admin_id = session.get('user_id')
-        user_type = session.get('user_type')
-        # print(f"ðŸ” Debug GET leads - admin_id: {admin_id}, user_type: {user_type}")
-        if not admin_id or user_type != 'admin':
-            print(f"âŒ GET leads Authentication failed - admin_id: {admin_id}, user_type: {user_type}")
-            return jsonify({'error': 'Not authenticated as admin'}), 403
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
         
         # Get all leads with LATEST assignment information (by assigned_at) 
         query = """
@@ -4793,12 +5465,10 @@ def get_admin_leads():
 def create_lead():
     """Create a new lead"""
     try:
-        admin_id = session.get('user_id')
-        user_type = session.get('user_type')
-        # print(f"ðŸ” Debug - admin_id: {admin_id}, user_type: {user_type}")
-        if not admin_id or user_type != 'admin':
-            print(f"âŒ Authentication failed - admin_id: {admin_id}, user_type: {user_type}")
-            return jsonify({'error': 'Not authenticated as admin'}), 403
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
         
         data = request.get_json()
         
@@ -4976,17 +5646,24 @@ def delete_lead(lead_id):
 def get_admin_employees():
     """Get all employees for admin dashboard"""
     try:
-        admin_id = session.get('user_id')
-        user_type = session.get('user_type')
-        if not admin_id or user_type != 'admin':
-            return jsonify({'error': 'Not authenticated as admin'}), 403
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
         
         # Get all employees with department info
         query = """
         SELECT 
-            u.id, u.employee_id, u.name, u.email, u.designation,
-            u.phone, u.created_at
+            u.id, u.employee_id, u.name, u.email, 
+            COALESCE(u.designation, '') as position,
+            COALESCE(u.department, '') as department,
+            COALESCE(u.manager, '') as manager,
+            COALESCE(u.phone, '') as phone,
+            u.created_at as hireDate,
+            COALESCE(SUBSTRING(u.name, 1, 1), '') as avatar,
+            u.status
         FROM users u
+        WHERE u.user_type = 'employee'
         ORDER BY u.name
         """
         
@@ -5032,9 +5709,10 @@ def get_admin_employee_details_by_id(employee_id):
 def get_companies():
     """Get all companies for admin"""
     try:
-        admin_id = session.get('user_id')
-        if not admin_id or session.get('user_type') != 'admin':
-            return jsonify({'error': 'Unauthorized'}), 401
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
         
         query = """
         SELECT c.id, c.company_name, c.email, c.contact_person, c.phone, c.industry, c.website, c.status, c.email_type,
@@ -5112,9 +5790,9 @@ def delete_company(company_id):
 def get_scheduled_emails():
     """Get all scheduled emails"""
     try:
-        admin_id = session.get('user_id')
-        if not admin_id or session.get('user_type') != 'admin':
-            return jsonify({'error': 'Unauthorized'}), 401
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
         
         # print(f"🔍 Debug: Getting scheduled emails for admin_id: {admin_id}")
         
@@ -5132,11 +5810,20 @@ def get_scheduled_emails():
         emails = execute_query(query)
         # print(f"🔍 Debug: Found {len(emails) if emails else 0} scheduled emails")
         
-        # Debug: Print first few scheduled times
+        # Format datetime objects for JSON serialization
         if emails:
-            for i, email in enumerate(emails[:3]):
-                # print(f"🔍 Debug Email {i+1}: scheduled_time = {email['scheduled_time']}, type = {type(email['scheduled_time'])}")
-                pass
+            for email in emails:
+                if email['scheduled_time']:
+                    email['scheduled_time'] = email['scheduled_time'].strftime('%Y-%m-%d %H:%M:%S')
+                if email.get('sent_at'):
+                    email['sent_at'] = email['sent_at'].strftime('%Y-%m-%d %H:%M:%S')
+                if email.get('created_at'):
+                    email['created_at'] = email['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Debug: Print first email to see the format
+        # if emails:
+        #     print(f"DEBUG: First email scheduled_time: {emails[0]['scheduled_time']}")
+        #     print(f"DEBUG: First email sent_at: {emails[0].get('sent_at')}")
         
         return jsonify({'success': True, 'emails': emails})
         
@@ -5230,20 +5917,53 @@ def cancel_scheduled_email(email_id):
 def schedule_bulk_emails():
     """Schedule emails for multiple companies with batch processing"""
     try:
-        admin_id = session.get('user_id')
-        if not admin_id or session.get('user_type') != 'admin':
-            return jsonify({'error': 'Unauthorized'}), 401
+        admin_id = session.get('user_id') or request.form.get('admin_id')
+        try:
+            if request.is_json and request.json:
+                admin_id = admin_id or request.json.get('admin_id')
+        except:
+            pass
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
         
-        data = request.get_json()
-        company_ids = data.get('company_ids', [])
-        scheduled_time = data.get('scheduled_time')
-        batch_size = data.get('batch_size', 10)  # Default to 10 companies per batch
-        batch_interval = data.get('batch_interval', 10)  # Default to 10 minutes between batches
+        # Check if request has files (FormData with attachment)
+        attachment_file = request.files.get('attachment')
+        if attachment_file and attachment_file.filename:
+            # Handle FormData request with attachment
+            import json
+            company_ids = json.loads(request.form.get('company_ids'))
+            scheduled_time = request.form.get('scheduled_time')
+            batch_size = int(request.form.get('batch_size', 10))
+            batch_interval = int(request.form.get('batch_interval', 10))
+            email_type = request.form.get('email_type', 'intro')
+            
+            # Save the attachment file
+            from werkzeug.utils import secure_filename
+            import os
+            
+            filename = secure_filename(attachment_file.filename)
+            # Create uploads directory if it doesn't exist
+            upload_dir = os.path.join('uploads', 'email_attachments')
+            os.makedirs(upload_dir, exist_ok=True)
+            
+            # Save file
+            filepath = os.path.join(upload_dir, filename)
+            attachment_file.save(filepath)
+            attachment_path = filepath
+        else:
+            # Handle JSON request (no attachment)
+            data = request.get_json()
+            company_ids = data.get('company_ids', [])
+            scheduled_time = data.get('scheduled_time')
+            batch_size = data.get('batch_size', 10)
+            batch_interval = data.get('batch_interval', 10)
+            email_type = data.get('email_type', 'intro')
+            attachment_path = None
         
         if not company_ids or not scheduled_time:
             return jsonify({'error': 'Company IDs and scheduled time are required'}), 400
         
-        print(f"📧 Scheduling bulk emails: {len(company_ids)} companies, batch_size={batch_size}, interval={batch_interval} minutes")
+        # print(f"📧 Scheduling bulk emails: {len(company_ids)} companies, batch_size={batch_size}, interval={batch_interval} minutes")
         
         # Check if admin_id exists in users table, if not use any existing user
         user_check_query = "SELECT id FROM users WHERE id = %s"
@@ -5291,13 +6011,13 @@ def schedule_bulk_emails():
                 # Add interval minutes for subsequent batches
                 batch_scheduled_time = initial_time + timedelta(minutes=(batch_number - 1) * batch_interval)
             
-            print(f"📦 Batch {batch_number}: {len(batch_companies)} companies scheduled for {batch_scheduled_time}")
+            # print(f"📦 Batch {batch_number}: {len(batch_companies)} companies scheduled for {batch_scheduled_time}")
             
             # Schedule emails for each company in this batch
             for company in batch_companies:
-                # Generate email template based on company's email_type and industry
+                # Generate email template based on the selected email_type and company's industry
                 template = get_email_template(
-                    company['email_type'], 
+                    email_type,  # Use the selected email type from the form
                     company['industry'], 
                     company['company_name'], 
                     company['contact_person']
@@ -5307,11 +6027,11 @@ def schedule_bulk_emails():
                 email_body = template['body']
                 
                 query = """
-                INSERT INTO scheduled_emails (company_id, subject, email_body, scheduled_time, created_by, email_type)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO scheduled_emails (company_id, subject, email_body, scheduled_time, created_by, email_type, attachment_path)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """
                 
-                execute_query(query, (company['id'], subject, email_body, batch_scheduled_time, created_by_id, company['email_type']))
+                execute_query(query, (company['id'], subject, email_body, batch_scheduled_time, created_by_id, email_type, attachment_path))
                 scheduled_count += 1
             
             batch_number += 1
@@ -5360,20 +6080,26 @@ def send_email_now(email_id):
         
         # Send actual email using SMTP
         try:
+            # Fetch current SMTP settings
+            smtp = get_smtp_settings()
+            
             msg = MIMEMultipart()
-            msg['From'] = SMTP_USERNAME
+            msg['From'] = f'YellowStone XPs <{smtp["smtp_username"]}>'
             msg['To'] = email_data['email']
             msg['Subject'] = email_data['subject']
+            
+            # Add anti-spam headers
+            add_anti_spam_headers(msg, smtp)
             
             # Add email body
             msg.attach(MIMEText(email_data['email_body'], 'plain'))
             
             # Connect to SMTP server and send email
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'])
             server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.login(smtp['smtp_username'], smtp['smtp_password'])
             text = msg.as_string()
-            server.sendmail(SMTP_USERNAME, email_data['email'], text)
+            server.sendmail(smtp['smtp_username'], email_data['email'], text)
             server.quit()
             
             print(f"✅ Email sent successfully to {email_data['email']}")
@@ -5444,23 +6170,29 @@ def send_all_pending_emails():
         
         # Connect to SMTP server once for all emails
         try:
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+            # Fetch current SMTP settings
+            smtp = get_smtp_settings()
+            
+            server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'])
             server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.login(smtp['smtp_username'], smtp['smtp_password'])
             
             for email_data in pending_emails:
                 try:
                     msg = MIMEMultipart()
-                    msg['From'] = SMTP_USERNAME
+                    msg['From'] = f'YellowStone XPs <{smtp["smtp_username"]}>'
                     msg['To'] = email_data['email']
                     msg['Subject'] = email_data['subject']
+                    
+                    # Add anti-spam headers
+                    add_anti_spam_headers(msg, smtp)
                     
                     # Add email body
                     msg.attach(MIMEText(email_data['email_body'], 'plain'))
                     
                     # Send email
                     text = msg.as_string()
-                    server.sendmail(SMTP_USERNAME, email_data['email'], text)
+                    server.sendmail(smtp['smtp_username'], email_data['email'], text)
                     
                     # Mark as sent in database
                     update_query = """
@@ -5699,7 +6431,7 @@ def check_and_send_scheduled_emails():
             # Find emails that should be sent (scheduled_time <= now and status = 'pending')
             query = """
             SELECT se.id, se.company_id, se.subject, se.email_body, se.scheduled_time,
-                   se.email_type, c.company_name, c.email, c.contact_person
+                   se.email_type, se.attachment_path, c.company_name, c.email, c.contact_person
             FROM scheduled_emails se
             JOIN companies c ON se.company_id = c.id
             WHERE se.status = 'pending' AND se.scheduled_time <= %s
@@ -5724,12 +6456,18 @@ def check_and_send_scheduled_emails():
                         # Get all Message-IDs in the thread for References header
                         thread_references = get_email_thread_references(email_data['company_id'])
                         
+                        # Get SMTP settings
+                        smtp = get_smtp_settings()
+                        
                         # Send actual email using SMTP
                         msg = MIMEMultipart()
-                        msg['From'] = SMTP_USERNAME
+                        msg['From'] = f'YellowStone XPs <{smtp["smtp_username"]}>'
                         msg['To'] = email_data['email']
                         msg['Subject'] = email_data['subject']
                         msg['Message-ID'] = message_id
+                        
+                        # Add anti-spam headers
+                        add_anti_spam_headers(msg, smtp)
                         
                         # Add threading headers for follow-up emails
                         if previous_message_id:
@@ -5743,12 +6481,37 @@ def check_and_send_scheduled_emails():
                         # Add email body
                         msg.attach(MIMEText(email_data['email_body'], 'plain'))
                         
+                        # Attach file if attachment_path exists
+                        if email_data.get('attachment_path'):
+                            try:
+                                import os
+                                if os.path.exists(email_data['attachment_path']):
+                                    with open(email_data['attachment_path'], 'rb') as f:
+                                        attachment_data = f.read()
+                                        from email.mime.base import MIMEBase
+                                        from email import encoders
+                                        
+                                        part = MIMEBase('application', 'octet-stream')
+                                        part.set_payload(attachment_data)
+                                        encoders.encode_base64(part)
+                                        part.add_header(
+                                            'Content-Disposition',
+                                            'attachment; filename= %s' % os.path.basename(email_data['attachment_path'])
+                                        )
+                                        msg.attach(part)
+                            except Exception as attach_error:
+                                # print(f"⚠️ Could not attach file: {attach_error}")
+                                pass
+                        
+                        # Fetch current SMTP settings
+                        smtp = get_smtp_settings()
+                        
                         # Connect to SMTP server and send email
-                        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+                        server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'])
                         server.starttls()
-                        server.login(SMTP_USERNAME, SMTP_PASSWORD)
+                        server.login(smtp['smtp_username'], smtp['smtp_password'])
                         text = msg.as_string()
-                        server.sendmail(SMTP_USERNAME, email_data['email'], text)
+                        server.sendmail(smtp['smtp_username'], email_data['email'], text)
                         server.quit()
                         
                         # print(f"✅ Email sent successfully to {email_data['email']}")
@@ -5764,13 +6527,13 @@ def check_and_send_scheduled_emails():
                         references_str = ' '.join(thread_references) if thread_references else None
                         execute_query(update_query, (message_id, previous_message_id, references_str, email_data['id'],))
                         
-                        # Emit WebSocket notification for real-time update
-                        socketio.emit('email_sent', {
-                            'email_id': email_data['id'],
-                            'company_name': email_data['company_name'],
-                            'status': 'sent',
-                            'sent_at': datetime.now().isoformat()
-                        }, room='admin')
+                        # Emit WebSocket notification for real-time update (commented out to avoid WSGI errors in background thread)
+                        # socketio.emit('email_sent', {
+                        #     'email_id': email_data['id'],
+                        #     'company_name': email_data['company_name'],
+                        #     'status': 'sent',
+                        #     'sent_at': datetime.now().isoformat()
+                        # }, room='admin')
                         
                     except Exception as email_error:
                         # print(f"❌ SMTP Error sending to {email_data['email']}: {email_error}")
@@ -5784,13 +6547,13 @@ def check_and_send_scheduled_emails():
                         
                         execute_query(update_query, (str(email_error), email_data['id'],))
                         
-                        # Emit WebSocket notification for failed email
-                        socketio.emit('email_failed', {
-                            'email_id': email_data['id'],
-                            'company_name': email_data['company_name'],
-                            'status': 'failed',
-                            'error_message': str(email_error)
-                        }, room='admin')
+                        # Emit WebSocket notification for failed email (commented out to avoid WSGI errors in background thread)
+                        # socketio.emit('email_failed', {
+                        #     'email_id': email_data['id'],
+                        #     'company_name': email_data['company_name'],
+                        #     'status': 'failed',
+                        #     'error_message': str(email_error)
+                        # }, room='admin')
             else:
                 # print("📭 No emails ready to send")
                 pass
@@ -5801,6 +6564,634 @@ def check_and_send_scheduled_emails():
         
         # Wait 30 seconds before checking again
         time.sleep(30)
+
+# Employee Access Management API Endpoints
+@app.route('/api/admin/employee-access', methods=['GET'])
+def get_employee_access():
+    """Get all employees with their access permissions"""
+    try:
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'  # Default to admin if no session
+        if not admin_id:
+            # Allow the request to proceed for admin portal
+            admin_id = 1  # Use default admin ID
+        
+        # Get all employees
+        query = """
+        SELECT id, name, email, employee_id, department, designation
+        FROM users
+        WHERE user_type = 'employee' AND status = 'active'
+        ORDER BY name ASC
+        """
+        employees = execute_query(query, fetch_all=True)
+        
+        # Get access permissions for each employee
+        for employee in employees:
+            access_query = """
+            SELECT access_type, has_access
+            FROM employee_access
+            WHERE employee_id = %s
+            """
+            access_permissions = execute_query(access_query, (employee['id'],), fetch_all=True)
+            
+            # Initialize access object
+            employee['access'] = {
+                'send_nda': False,
+                'send_leads': False,
+                'hr_access': False
+            }
+            
+            # Set access based on database
+            for perm in access_permissions:
+                if perm['access_type'] in employee['access']:
+                    # Convert MySQL boolean (1/0) to Python boolean
+                    employee['access'][perm['access_type']] = bool(perm['has_access'])
+        
+        return jsonify({'success': True, 'employees': employees})
+        
+    except Exception as e:
+        # print(f"❌ Error getting employee access: {e}")
+        return jsonify({'error': 'Failed to get employee access'}), 500
+
+@app.route('/api/admin/employee-access/<int:employee_id>', methods=['PUT'])
+def update_employee_access(employee_id):
+    """Update access permissions for an employee"""
+    try:
+        # Try to get admin_id from session, request args, or JSON body
+        admin_id = session.get('user_id')
+        if not admin_id:
+            data = request.get_json() if request.is_json else {}
+            admin_id = data.get('admin_id') or request.form.get('admin_id') or request.args.get('admin_id')
+        
+        # Default to admin_id = 1 if not found (for development/testing)
+        if not admin_id:
+            admin_id = 1
+        
+        data = request.get_json()
+        access_type = data.get('access_type')
+        has_access = data.get('has_access', False)
+        
+        if not access_type:
+            return jsonify({'error': 'Access type required'}), 400
+        
+        # Insert or update access
+        query = """
+        INSERT INTO employee_access (employee_id, access_type, has_access)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE has_access = VALUES(has_access)
+        """
+        execute_query(query, (employee_id, access_type, has_access))
+        
+        return jsonify({'success': True, 'message': 'Access updated successfully'})
+        
+    except Exception as e:
+        # print(f"❌ Error updating employee access: {e}")
+        return jsonify({'error': 'Failed to update employee access'}), 500
+
+@app.route('/api/admin/employee-access/bulk', methods=['PUT'])
+def update_bulk_employee_access():
+    """Update access permissions for multiple employees"""
+    try:
+        admin_id = session.get('user_id')
+        if not admin_id or session.get('user_type') != 'admin':
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        data = request.get_json()
+        updates = data.get('updates', [])
+        
+        for update in updates:
+            employee_id = update.get('employee_id')
+            access_type = update.get('access_type')
+            has_access = update.get('has_access', False)
+            
+            if not employee_id or not access_type:
+                continue
+            
+            query = """
+            INSERT INTO employee_access (employee_id, access_type, has_access)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE has_access = VALUES(has_access)
+            """
+            execute_query(query, (employee_id, access_type, has_access))
+        
+        return jsonify({'success': True, 'message': 'Access permissions updated successfully'})
+        
+    except Exception as e:
+        # print(f"❌ Error updating bulk employee access: {e}")
+        return jsonify({'error': 'Failed to update employee access'}), 500
+
+@app.route('/api/employee/access-permissions', methods=['GET'])
+def get_employee_access_permissions():
+    """Get access permissions for the logged-in employee"""
+    try:
+        # Try to get employee_id from query parameter FIRST, then session
+        employee_id = request.args.get('employee_id')
+        
+        # If not in query parameter, try to get from session
+        if not employee_id:
+            employee_id = session.get('user_id')
+        
+        # Convert to int if it's a string
+        if employee_id:
+            try:
+                employee_id = int(employee_id)
+            except (ValueError, TypeError):
+                pass
+        
+        # If still no employee_id, return unauthorized
+        if not employee_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Get access permissions for this employee
+        query = """
+        SELECT access_type, has_access
+        FROM employee_access
+        WHERE employee_id = %s
+        """
+        permissions = execute_query(query, (employee_id,), fetch_all=True)
+        
+        # Build access object
+        access = {
+            'send_nda': False,
+            'send_leads': False,
+            'hr_access': False
+        }
+        
+        for perm in permissions:
+            if perm['access_type'] in access:
+                # Convert MySQL boolean (1/0) to Python boolean
+                access[perm['access_type']] = bool(perm['has_access'])
+        
+        return jsonify({'success': True, 'access': access})
+        
+    except Exception as e:
+        # print(f"❌ Error getting employee access: {e}")
+        return jsonify({'error': 'Failed to get employee access'}), 500
+
+# Settings API Endpoints
+@app.route('/api/admin/settings', methods=['GET'])
+def get_settings():
+    """Get all system settings"""
+    try:
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
+        
+        query = """
+        SELECT setting_key, setting_value, setting_category, description
+        FROM system_settings
+        ORDER BY setting_category, setting_key
+        """
+        
+        settings = execute_query(query)
+        
+        # Group settings by category
+        settings_dict = {}
+        for setting in settings:
+            category = setting['setting_category']
+            if category not in settings_dict:
+                settings_dict[category] = {}
+            settings_dict[category][setting['setting_key']] = setting['setting_value']
+        
+        return jsonify({'success': True, 'settings': settings_dict})
+        
+    except Exception as e:
+        # print(f"❌ Error getting settings: {e}")
+        return jsonify({'error': 'Failed to get settings'}), 500
+
+@app.route('/api/admin/settings', methods=['PUT'])
+def update_settings():
+    """Update system settings"""
+    try:
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
+        
+        data = request.get_json()
+        settings = data.get('settings', {})
+        
+        # Update each setting in the database
+        for category, category_settings in settings.items():
+            for key, value in category_settings.items():
+                query = """
+                INSERT INTO system_settings (setting_key, setting_value, setting_category)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+                """
+                execute_query(query, (key, str(value), category))
+        
+        # If email settings are updated, update the global SMTP variables
+        if 'email' in settings:
+            global SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+            if 'smtp_server' in settings['email']:
+                SMTP_SERVER = settings['email']['smtp_server']
+            if 'smtp_port' in settings['email']:
+                SMTP_PORT = int(settings['email']['smtp_port'])
+            if 'smtp_username' in settings['email']:
+                SMTP_USERNAME = settings['email']['smtp_username']
+            if 'smtp_password' in settings['email']:
+                SMTP_PASSWORD = settings['email']['smtp_password']
+        
+        return jsonify({'success': True, 'message': 'Settings updated successfully'})
+        
+    except Exception as e:
+        # print(f"❌ Error updating settings: {e}")
+        return jsonify({'error': 'Failed to update settings'}), 500
+
+@app.route('/api/admin/settings/<string:key>', methods=['PUT'])
+def update_setting(key):
+    """Update a single setting"""
+    try:
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
+        
+        data = request.get_json()
+        value = data.get('value')
+        category = data.get('category', 'system')
+        
+        query = """
+        INSERT INTO system_settings (setting_key, setting_value, setting_category)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+        """
+        execute_query(query, (key, str(value), category))
+        
+        # Update global SMTP variables if email settings are changed
+        if category == 'email':
+            global SMTP_SERVER, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+            if key == 'smtp_server':
+                SMTP_SERVER = value
+            elif key == 'smtp_port':
+                SMTP_PORT = int(value)
+            elif key == 'smtp_username':
+                SMTP_USERNAME = value
+            elif key == 'smtp_password':
+                SMTP_PASSWORD = value
+        
+        return jsonify({'success': True, 'message': 'Setting updated successfully'})
+        
+    except Exception as e:
+        # print(f"❌ Error updating setting: {e}")
+        return jsonify({'error': 'Failed to update setting'}), 500
+
+@app.route('/api/admin/settings/test-email', methods=['POST'])
+def test_email():
+    """Test email configuration"""
+    print("🔵 TEST EMAIL ENDPOINT CALLED")
+    try:
+        admin_id = session.get('user_id') or request.args.get('admin_id')
+        user_type = session.get('user_type') or 'admin'
+        if not admin_id:
+            admin_id = 1  # Use default admin ID
+        
+        data = request.get_json()
+        print(f"🔵 DATA RECEIVED: {data}")
+        if not data:
+            print("⚠️ No JSON data received in test-email request")
+            return jsonify({'error': 'Request body is required'}), 400
+        
+        test_email_address = data.get('email')
+        print(f"🔵 Test email address: {test_email_address}")
+        
+        if not test_email_address or test_email_address.strip() == '':
+            print(f"⚠️ No email address provided in test-email request. Data received: {data}")
+            return jsonify({'error': 'Please enter a test email address in the "Enter test email address" field'}), 400
+        
+        print("🔵 Fetching SMTP settings from database...")
+        # Get current SMTP settings
+        smtp_query = """
+        SELECT setting_key, setting_value
+        FROM system_settings
+        WHERE setting_category = 'email' AND setting_key IN ('smtp_server', 'smtp_port', 'smtp_username', 'smtp_password', 'from_name')
+        """
+        smtp_settings = execute_query(smtp_query)
+        print(f"🔵 SMTP settings fetched: {len(smtp_settings) if smtp_settings else 0} records")
+        
+        # Check if SMTP settings exist
+        if not smtp_settings or len(smtp_settings) == 0:
+            print("⚠️ No SMTP settings found in database")
+            return jsonify({'error': '⚠️ SMTP settings not saved. Please click "Save Changes" first before testing.'}), 400
+        
+        # Build SMTP config
+        smtp_config = {}
+        for setting in smtp_settings:
+            smtp_config[setting['setting_key']] = setting['setting_value'].strip() if setting['setting_value'] else setting['setting_value']
+        print(f"🔵 Built SMTP config: {list(smtp_config.keys())}")
+        
+        # Check if required settings exist
+        required_settings = ['smtp_server', 'smtp_port', 'smtp_username', 'smtp_password']
+        print(f"🔵 Checking required settings. Values:")
+        for req in required_settings:
+            value = smtp_config.get(req, 'NOT SET')
+            print(f"  - {req}: {value[:20] + '...' if value and len(value) > 20 else value}")
+        
+        missing_settings = [req for req in required_settings if not smtp_config.get(req)]
+        if missing_settings:
+            print(f"⚠️ Missing SMTP settings: {missing_settings}")
+            return jsonify({'error': f'Missing required SMTP settings: {", ".join(missing_settings)}. Please save your settings first.'}), 400
+        
+        print("✅ All SMTP settings validated successfully")
+        
+        # Send test email
+        print("🔵 Creating email message...")
+        msg = MIMEMultipart()
+        msg['From'] = smtp_config.get('smtp_username', SMTP_USERNAME)
+        msg['To'] = test_email_address
+        msg['Subject'] = 'Test Email from YellowStone XPs'
+        print(f"🔵 Email From: {msg['From']}, To: {msg['To']}")
+        
+        body = """This is a test email from YellowStone XPs Management Portal.
+        
+Your email configuration is working correctly!
+
+This email was sent to verify your SMTP settings.
+
+Regards,
+YellowStone XPs Team"""
+        
+        msg.attach(MIMEText(body, 'plain'))
+        
+        smtp_server = smtp_config.get('smtp_server', SMTP_SERVER)
+        smtp_port = int(smtp_config.get('smtp_port', SMTP_PORT))
+        
+        # Correct port if user entered common IMAP/POP3 ports
+        if smtp_port == 995 or smtp_port == 993 or smtp_port == 110 or smtp_port == 143:
+            smtp_port = 587  # Default SMTP port with STARTTLS
+        
+        # Validate SMTP server hostname can be resolved
+        print(f"🔵 Validating SMTP server hostname: {smtp_server}")
+        try:
+            import socket
+            resolved_ip = socket.gethostbyname(smtp_server)
+            print(f"✅ SMTP server resolved to: {resolved_ip}")
+        except socket.gaierror as e:
+            print(f"⚠️ Failed to resolve SMTP server: {e}")
+            # Don't return error here - some networks have DNS issues but SMTP still works
+            print(f"⚠️ Continuing anyway - will try to connect to SMTP server")
+        
+        # Connect to SMTP server
+        print(f"Attempting to connect to {smtp_server}:{smtp_port}")
+        
+        # Use SSL for port 465, STARTTLS for other ports
+        if smtp_port == 465:
+            # SSL connection
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=30)
+        else:
+            # STARTTLS connection
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+            if smtp_port in [587, 25, 2525]:  # Only use STARTTLS for these ports
+                server.starttls()
+        
+        server.login(smtp_config.get('smtp_username', SMTP_USERNAME), 
+                    smtp_config.get('smtp_password', SMTP_PASSWORD))
+        server.sendmail(smtp_config.get('smtp_username', SMTP_USERNAME), test_email_address, msg.as_string())
+        server.quit()
+        
+        return jsonify({'success': True, 'message': f'Test email sent successfully using port {smtp_port}'})
+        
+    except Exception as e:
+        error_message = str(e)
+        print(f"Error sending test email: {error_message}")
+        
+        # Provide helpful error messages
+        if 'getaddrinfo failed' in error_message or '11001' in error_message:
+            detailed_error = (
+                'Could not reach the SMTP server. '
+                'Please verify:\n\n'
+                '1. SMTP Server address is correct\n'
+                '2. Port number is correct (587 for STARTTLS, 465 for SSL)\n'
+                '3. Internet connection is working\n\n'
+                'Common SMTP servers:\n'
+                '- Gmail: smtp.gmail.com (port 587)\n'
+                '- Outlook: smtp-mail.outlook.com (port 587)\n'
+                '- Yahoo: smtp.mail.yahoo.com (port 587)\n'
+                '- Custom: Check with your email provider'
+            )
+        elif 'authentication' in error_message.lower() or '535' in error_message:
+            detailed_error = 'Authentication failed. Check your username and password (use app password for Gmail).'
+        elif 'connection refused' in error_message or 'connection reset' in error_message:
+            detailed_error = 'Connection refused. Check if the port is correct and if your firewall allows the connection.'
+        else:
+            detailed_error = f'Error: {error_message}'
+        
+        return jsonify({'error': detailed_error}), 500
+
+@app.route('/api/employee/change-password', methods=['POST'])
+def change_employee_password():
+    """Change employee password"""
+    try:
+        data = request.get_json()
+        employee_id = data.get('employee_id')
+        current_password = data.get('current_password')
+        new_password = data.get('new_password')
+        
+        if not employee_id or not current_password or not new_password:
+            return jsonify({'success': False, 'message': 'All fields are required'}), 400
+        
+        # Get user from users table
+        query = "SELECT id, password_hash, user_type FROM users WHERE id = %s"
+        user = execute_query(query, (employee_id,), fetch_one=True)
+        
+        if not user:
+            return jsonify({'success': False, 'message': 'Employee not found'}), 404
+        
+        # Verify current password
+        if not bcrypt.checkpw(current_password.encode('utf-8'), user['password_hash'].encode('utf-8')):
+            return jsonify({'success': False, 'message': 'Current password is incorrect'}), 401
+        
+        # Hash new password
+        password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        # Update password
+        update_query = "UPDATE users SET password_hash = %s WHERE id = %s"
+        execute_query(update_query, (password_hash, employee_id))
+        
+        return jsonify({'success': True, 'message': 'Password changed successfully'})
+        
+    except Exception as e:
+        # print(f"Error changing password: {e}")
+        return jsonify({'success': False, 'message': 'Failed to change password'}), 500
+
+@app.route('/api/auth/employee-forgot-password', methods=['POST'])
+def employee_forgot_password():
+    """Reset employee password without requiring old password"""
+    try:
+        data = request.get_json()
+        employee_id_str = data.get('employee_id')
+        new_password = data.get('new_password')
+        
+        if not employee_id_str or not new_password:
+            return jsonify({'success': False, 'message': 'Employee ID and new password are required'}), 400
+        
+        if len(new_password) < 6:
+            return jsonify({'success': False, 'message': 'Password must be at least 6 characters long'}), 400
+        
+        # Get employee by employee_id from users table
+        query = "SELECT id, user_type FROM users WHERE employee_id = %s AND user_type = 'employee'"
+        user = execute_query(query, (employee_id_str,), fetch_one=True)
+        
+        if not user:
+            return jsonify({'success': False, 'message': 'Employee ID not found'}), 404
+        
+        # Hash new password
+        password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+        
+        # Update password in database
+        update_query = "UPDATE users SET password_hash = %s WHERE employee_id = %s AND user_type = 'employee'"
+        execute_query(update_query, (password_hash, employee_id_str))
+        
+        return jsonify({'success': True, 'message': 'Password reset successfully'})
+        
+    except Exception as e:
+        # print(f"Error resetting password: {e}")
+        return jsonify({'success': False, 'message': 'Failed to reset password'}), 500
+
+# ==================== TENDERS MANAGEMENT ENDPOINTS ====================
+
+@app.route('/api/admin/tenders', methods=['GET'])
+def get_tenders():
+    """Get all tenders"""
+    try:
+        tender_type = request.args.get('type', 'all')  # 'all', 'government', 'private'
+        
+        query = """
+        SELECT 
+            t.*,
+            u.name as created_by_name,
+            u2.name as updated_by_name,
+            DATEDIFF(t.submission_deadline, CURDATE()) as days_left
+        FROM tenders t
+        LEFT JOIN users u ON t.created_by = u.id
+        LEFT JOIN users u2 ON t.updated_by = u2.id
+        """
+        
+        if tender_type != 'all':
+            query += " WHERE t.tender_type = %s"
+            tenders = execute_query(query, (tender_type,), fetch_all=True)
+        else:
+            tenders = execute_query(query, fetch_all=True)
+        
+        return jsonify(tenders if tenders else [])
+        
+    except Exception as e:
+        print(f"Error getting tenders: {e}")
+        return jsonify([])
+
+@app.route('/api/admin/tenders', methods=['POST'])
+def create_tender():
+    """Create a new tender"""
+    try:
+        data = request.get_json()
+        
+        required_fields = ['tender_number', 'title', 'tender_type', 'status']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'success': False, 'message': f'{field} is required'}), 400
+        
+        query = """
+        INSERT INTO tenders (
+            tender_number, title, description, tender_type, category,
+            organization_name, budget_amount, currency, published_date,
+            submission_deadline, opening_date, status, contact_person,
+            contact_email, contact_phone, location, eligibility_criteria,
+            documents_required, important_documents, created_by
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+        """
+        
+        params = (
+            data.get('tender_number'),
+            data.get('title'),
+            data.get('description', ''),
+            data.get('tender_type'),
+            data.get('category', ''),
+            data.get('organization_name', ''),
+            data.get('budget_amount'),
+            data.get('currency', 'INR'),
+            data.get('published_date'),
+            data.get('submission_deadline'),
+            data.get('opening_date'),
+            data.get('status'),
+            data.get('contact_person', ''),
+            data.get('contact_email', ''),
+            data.get('contact_phone', ''),
+            data.get('location', ''),
+            data.get('eligibility_criteria', ''),
+            data.get('documents_required', ''),
+            json.dumps(data.get('important_documents', [])),
+            1  # created_by - admin ID
+        )
+        
+        execute_query(query, params)
+        return jsonify({'success': True, 'message': 'Tender created successfully'})
+        
+    except Exception as e:
+        print(f"Error creating tender: {e}")
+        return jsonify({'success': False, 'message': 'Failed to create tender'}), 500
+
+@app.route('/api/admin/tenders/<int:tender_id>', methods=['PUT'])
+def update_tender(tender_id):
+    """Update a tender"""
+    try:
+        data = request.get_json()
+        
+        query = """
+        UPDATE tenders 
+        SET title = %s, description = %s, tender_type = %s, category = %s,
+            organization_name = %s, budget_amount = %s, currency = %s,
+            published_date = %s, submission_deadline = %s, opening_date = %s,
+            status = %s, contact_person = %s, contact_email = %s,
+            contact_phone = %s, location = %s, eligibility_criteria = %s,
+            documents_required = %s, important_documents = %s, updated_by = %s
+        WHERE id = %s
+        """
+        
+        params = (
+            data.get('title'),
+            data.get('description', ''),
+            data.get('tender_type'),
+            data.get('category', ''),
+            data.get('organization_name', ''),
+            data.get('budget_amount'),
+            data.get('currency', 'INR'),
+            data.get('published_date'),
+            data.get('submission_deadline'),
+            data.get('opening_date'),
+            data.get('status'),
+            data.get('contact_person', ''),
+            data.get('contact_email', ''),
+            data.get('contact_phone', ''),
+            data.get('location', ''),
+            data.get('eligibility_criteria', ''),
+            data.get('documents_required', ''),
+            json.dumps(data.get('important_documents', [])),
+            1,  # updated_by - admin ID
+            tender_id
+        )
+        
+        execute_query(query, params)
+        return jsonify({'success': True, 'message': 'Tender updated successfully'})
+        
+    except Exception as e:
+        print(f"Error updating tender: {e}")
+        return jsonify({'success': False, 'message': 'Failed to update tender'}), 500
+
+@app.route('/api/admin/tenders/<int:tender_id>', methods=['DELETE'])
+def delete_tender(tender_id):
+    """Delete a tender"""
+    try:
+        query = "DELETE FROM tenders WHERE id = %s"
+        execute_query(query, (tender_id,))
+        return jsonify({'success': True, 'message': 'Tender deleted successfully'})
+        
+    except Exception as e:
+        print(f"Error deleting tender: {e}")
+        return jsonify({'success': False, 'message': 'Failed to delete tender'}), 500
 
 # Start the background email scheduler
 email_scheduler_thread = threading.Thread(target=check_and_send_scheduled_emails, daemon=True)

@@ -20,6 +20,8 @@ import GenerateLeadsView from './GenerateLeadsView';
 import AttendanceView from './AttendanceView';
 import SendNDAModal from './SendNDAModal';
 import BulkSendNDAModal from './BulkSendNDAModal';
+import TendersView from './TendersView';
+import ReportsView from './ReportsView';
 import { useSocket } from '../contexts/SocketContext';
 
 const AdminDashboard = ({ user, onLogout }) => {
@@ -269,10 +271,12 @@ const AdminDashboard = ({ user, onLogout }) => {
               },
               { id: 'tasks', label: 'Tasks', icon: CheckSquare },
               { id: 'projects', label: 'Projects', icon: Briefcase },
+              { id: 'tenders', label: 'Tenders', icon: FileText },
               { id: 'tickets', label: 'Tickets', icon: Ticket },
               { id: 'generate-leads', label: 'Generate Leads', icon: Target },
               { id: 'attendance', label: 'Attendance Info', icon: CheckCircle },
-              { id: 'organization', label: 'Organization', icon: Users }
+              { id: 'organization', label: 'Organization', icon: Users },
+              { id: 'settings', label: 'Settings', icon: Settings }
             ].map(tab => (
               <div key={tab.id} className={tab.hasDropdown ? 'vendors-dropdown' : ''}>
                 <button
@@ -546,10 +550,12 @@ const AdminDashboard = ({ user, onLogout }) => {
         {activeTab === 'nda-forms' && <NDAFormsView showNotification={showNotification} />}
         {activeTab === 'tasks' && <TasksView showNotification={showNotification} />}
         {activeTab === 'projects' && <ProjectsView showNotification={showNotification} />}
+        {activeTab === 'tenders' && <TendersView showNotification={showNotification} />}
         {activeTab === 'tickets' && <TicketsView showNotification={showNotification} />}
-        {activeTab === 'generate-leads' && <GenerateLeadsView showNotification={showNotification} />}
+        {activeTab === 'generate-leads' && <GenerateLeadsView showNotification={showNotification} isEmployee={false} />}
         {activeTab === 'attendance' && <AttendanceView showNotification={showNotification} />}
         {activeTab === 'organization' && <OrganizationStructureView showNotification={showNotification} />}
+        {activeTab === 'settings' && <SettingsView showNotification={showNotification} />}
         </main>
       </div>
 
@@ -611,143 +617,7 @@ const AdminDashboard = ({ user, onLogout }) => {
               </div>
             </div>
             <div className="p-6 overflow-y-auto flex-1 modal-scrollbar">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Summary Cards */}
-                <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6">
-                  <h4 className="text-lg font-semibold text-blue-900 mb-4">Vendor Summary</h4>
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-blue-700">Total Vendors:</span>
-                      <span className="font-semibold text-blue-900">{vendors.length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-blue-700">Active Vendors:</span>
-                      <span className="font-semibold text-blue-900">{vendors.filter(v => v.status === 'active').length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-blue-700">Pending Approval:</span>
-                      <span className="font-semibold text-blue-900">{vendors.filter(v => v.status === 'pending').length}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6">
-                  <h4 className="text-lg font-semibold text-green-900 mb-4">Forms Summary</h4>
-                  <div className="space-y-3">
-                    <div className="flex justify-between">
-                      <span className="text-green-700">Total Forms:</span>
-                      <span className="font-semibold text-green-900">{submittedForms.length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-green-700">Completed Forms:</span>
-                      <span className="font-semibold text-green-900">{submittedForms.filter(f => f.status === 'completed').length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-green-700">Pending Forms:</span>
-                      <span className="font-semibold text-green-900">{submittedForms.filter(f => f.status === 'pending').length}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Charts Section */}
-                <div className="lg:col-span-2 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl p-6">
-                  <h4 className="text-lg font-semibold text-purple-900 mb-4">Monthly Trends</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-white rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-purple-600">{stats.totalVendors || 0}</div>
-                      <div className="text-sm text-purple-700">Total Vendors</div>
-                    </div>
-                    <div className="bg-white rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-purple-600">{stats.totalForms || 0}</div>
-                      <div className="text-sm text-purple-700">Total Forms</div>
-                    </div>
-                    <div className="bg-white rounded-lg p-4 text-center">
-                      <div className="text-2xl font-bold text-purple-600">{stats.completionRate || 0}%</div>
-                      <div className="text-sm text-purple-700">Completion Rate</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Export Options */}
-                <div className="lg:col-span-2 bg-gradient-to-br from-amber-50 to-amber-100 rounded-xl p-6">
-                  <h4 className="text-lg font-semibold text-amber-900 mb-4">Export Options</h4>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={handleExportData}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                    >
-                      <Download size={16} />
-                      Export All Data
-                    </button>
-                    <button
-                      onClick={() => {
-                        // Export vendors only
-                        const csvData = [['Company Name', 'Email', 'Contact Person', 'Phone', 'Address', 'Status', 'Reference Number']];
-                        vendors.forEach(vendor => {
-                          csvData.push([
-                            vendor.company_name || '',
-                            vendor.email || '',
-                            vendor.contact_person || '',
-                            vendor.phone || '',
-                            vendor.address || '',
-                            vendor.status || '',
-                            vendor.reference_number || ''
-                          ]);
-                        });
-                        const csvString = csvData.map(row => 
-                          row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
-                        ).join('\n');
-                        const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-                        const link = document.createElement('a');
-                        const url = URL.createObjectURL(blob);
-                        link.setAttribute('href', url);
-                        link.setAttribute('download', `vendors_export_${new Date().toISOString().split('T')[0]}.csv`);
-                        link.style.visibility = 'hidden';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        showNotification('Vendors data exported successfully!', 'success');
-                      }}
-                      className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-                    >
-                      <Download size={16} />
-                      Export Vendors
-                    </button>
-                    <button
-                      onClick={() => {
-                        // Export forms only
-                        const csvData = [['Company Name', 'Email', 'Status', 'Submitted Date', 'Reference Number']];
-                        submittedForms.forEach(form => {
-                          csvData.push([
-                            form.company_name || '',
-                            form.email || '',
-                            form.status || '',
-                            form.submitted_at || '',
-                            form.reference_number || ''
-                          ]);
-                        });
-                        const csvString = csvData.map(row => 
-                          row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
-                        ).join('\n');
-                        const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-                        const link = document.createElement('a');
-                        const url = URL.createObjectURL(blob);
-                        link.setAttribute('href', url);
-                        link.setAttribute('download', `forms_export_${new Date().toISOString().split('T')[0]}.csv`);
-                        link.style.visibility = 'hidden';
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        showNotification('Forms data exported successfully!', 'success');
-                      }}
-                      className="flex items-center gap-2 px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors"
-                    >
-                      <Download size={16} />
-                      Export Forms
-                    </button>
-                  </div>
-                </div>
-              </div>
+              <ReportsView showNotification={showNotification} />
             </div>
           </div>
         </div>

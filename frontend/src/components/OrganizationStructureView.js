@@ -422,16 +422,17 @@ const OrganizationStructureView = ({ showNotification }) => {
       const isExpanded = expandedNodes.has(employee.id);
       
       return (
-        <div key={employee.id} className="org-level" style={{ marginTop: level === 0 ? '0' : '40px' }}>
+        <div key={employee.id}>
           {/* Level Header - only show for top level */}
           {level === 0 && (
-            <div className="level-header">
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">Chief Executive Officer</h2>
-              <div className="w-24 h-1 bg-gradient-to-r from-red-500 to-red-600 mx-auto rounded-full"></div>
+            <div className="level-header text-center mb-8">
+              <h3 className="text-xl font-semibold text-gray-700 mb-2">Chief Executive Officer</h3>
+              <div className="w-16 h-1 bg-gradient-to-r from-pink-500 to-pink-600 mx-auto rounded-full"></div>
             </div>
           )}
           
           {/* Employee Node Container - Center aligned */}
+          <div className={`org-level ${level === 0 ? '' : ''}`} style={{ marginTop: level === 0 ? '0' : '40px' }}>
           <div className="flex justify-center">
             <div className={`org-node ${getNodeClass(employee)}`} onClick={() => openEmployeeDetail(employee)}>
               <div className="node-avatar">
@@ -472,12 +473,12 @@ const OrganizationStructureView = ({ showNotification }) => {
           {/* Direct Reports (only if expanded) */}
           {hasReports && isExpanded && (
             <div className="direct-reports">
-              {/* VP Level - Horizontal Layout */}
+              {/* Managers Level - Horizontal Layout */}
               {level === 0 && (
                 <div className="vp-level">
                   <div className="level-header">
-                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Executive Leadership</h3>
-                    <div className="w-16 h-1 bg-gradient-to-r from-blue-500 to-blue-600 mx-auto rounded-full"></div>
+                    <h3 className="text-xl font-semibold text-gray-700 mb-2">Managers</h3>
+                    <div className="w-16 h-1 bg-gradient-to-r from-orange-500 to-orange-600 mx-auto rounded-full"></div>
                   </div>
                   <div className="vp-container">
                     {employee.children.map(vp => (
@@ -517,12 +518,12 @@ const OrganizationStructureView = ({ showNotification }) => {
                           )}
                         </div>
                         
-                        {/* Directors under VP - Vertical Layout */}
+                        {/* Team Leads under Manager - Vertical Layout */}
                         {vp.children && vp.children.length > 0 && expandedNodes.has(vp.id) && (
                           <div className="directors-container">
                             <div className="level-header">
-                              <h4 className="text-lg font-medium text-gray-600 mb-2">Team Members</h4>
-                              <div className="w-12 h-1 bg-gradient-to-r from-purple-500 to-purple-600 mx-auto rounded-full"></div>
+                              <h4 className="text-lg font-medium text-gray-600 mb-2">Team Leads (TL)</h4>
+                              <div className="w-12 h-1 bg-gradient-to-r from-green-500 to-green-600 mx-auto rounded-full"></div>
                             </div>
                             <div className="directors-list">
                               {vp.children.map(director => (
@@ -562,12 +563,12 @@ const OrganizationStructureView = ({ showNotification }) => {
                                     )}
                                   </div>
                                   
-                                  {/* Director's Team Members */}
+                                  {/* Team Lead's Team Members */}
                                   {director.children && director.children.length > 0 && expandedNodes.has(director.id) && (
                                     <div className="team-members-container">
                                       <div className="level-header">
                                         <h5 className="text-md font-medium text-gray-500 mb-2">Team Members</h5>
-                                        <div className="w-8 h-1 bg-gradient-to-r from-green-500 to-green-600 mx-auto rounded-full"></div>
+                                        <div className="w-8 h-1 bg-gradient-to-r from-blue-500 to-blue-600 mx-auto rounded-full"></div>
                                       </div>
                                       <div className="team-members-list">
                                         {director.children.map(teamMember => (
@@ -623,6 +624,7 @@ const OrganizationStructureView = ({ showNotification }) => {
               )}
             </div>
           )}
+          </div>
         </div>
       );
     };
@@ -662,9 +664,9 @@ const OrganizationStructureView = ({ showNotification }) => {
             <div className="flex items-center gap-2">
               <h3 className="font-medium text-gray-900">{node.name}</h3>
               {node.position === 'CEO' && <Crown size={16} className="text-yellow-500" />}
-              {node.position.includes('Manager') && <Shield size={16} className="text-blue-500" />}
+              {node.position && node.position.includes('Manager') && <Shield size={16} className="text-blue-500" />}
             </div>
-            <p className="text-sm text-gray-600">{node.position} • {node.department}</p>
+            <p className="text-sm text-gray-600">{node.position || 'No Position'} • {node.department || 'No Department'}</p>
             <p className="text-xs text-gray-500">{node.email}</p>
           </div>
 
@@ -853,10 +855,10 @@ const OrganizationStructureView = ({ showNotification }) => {
                     <div className="flex items-center gap-2">
                       <h3 className="font-medium text-gray-900">{employee.name}</h3>
                       {employee.position === 'CEO' && <Crown size={16} className="text-yellow-500" />}
-                      {employee.position.includes('Manager') && <Shield size={16} className="text-blue-500" />}
+                      {employee.position && employee.position.includes('Manager') && <Shield size={16} className="text-blue-500" />}
                     </div>
-                    <p className="text-sm text-gray-600">{employee.position} • {employee.department}</p>
-                    <p className="text-xs text-gray-500">{employee.email} • {employee.phone}</p>
+                    <p className="text-sm text-gray-600">{employee.position || 'No Position'} • {employee.department || 'No Department'}</p>
+                    <p className="text-xs text-gray-500">{employee.email} • {employee.phone || 'No Phone'}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-medium text-gray-900">{employee.employeeId}</p>

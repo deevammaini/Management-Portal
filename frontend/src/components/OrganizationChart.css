@@ -64,11 +64,11 @@
 
 /* CEO Node */
 .ceo-node {
-  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  background: linear-gradient(135deg, #ec4899 0%, #db2777 100%);
   color: white;
-  border-color: #dc2626;
-  transform: scale(1.15);
-  box-shadow: 0 8px 25px -5px rgba(220, 38, 38, 0.4);
+  border-color: #ec4899;
+  transform: scale(1.1);
+  box-shadow: 0 8px 25px -5px rgba(236, 72, 153, 0.4);
   margin: 0 25px;
   min-width: 250px;
   max-width: 320px;
@@ -97,13 +97,13 @@
   color: rgba(255, 255, 255, 0.7);
 }
 
-/* VP Nodes */
+/* Manager Nodes */
 .vp-node {
-  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  background: linear-gradient(135deg, #fb923c 0%, #f97316 100%);
   color: white;
-  border-color: #1d4ed8;
-  transform: scale(1.05);
-  box-shadow: 0 6px 20px -4px rgba(29, 78, 216, 0.3);
+  border-color: #fb923c;
+  transform: scale(1.02);
+  box-shadow: 0 6px 20px -4px rgba(251, 146, 60, 0.3);
   margin: 0 20px;
   min-width: 240px;
   max-width: 300px;
@@ -132,11 +132,11 @@
   color: rgba(255, 255, 255, 0.7);
 }
 
-/* Director Nodes */
+/* Team Lead (TL) Nodes */
 .director-node {
-  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
   color: white;
-  border-color: #059669;
+  border-color: #10b981;
 }
 
 .director-node .node-avatar {
@@ -162,11 +162,11 @@
   color: rgba(255, 255, 255, 0.7);
 }
 
-/* Employee Nodes */
+/* Worker/Saler Nodes */
 .employee-node {
-  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: white;
-  border-color: #7c3aed;
+  border-color: #3b82f6;
 }
 
 .employee-node .node-avatar {

@@ -73,17 +73,52 @@ const SettingsView = ({ showNotification }) => {
 
   const [originalSettings, setOriginalSettings] = useState({});
 
+  // Employee access state
+  const [employees, setEmployees] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [selectedEmployee, setSelectedEmployee] = useState(null);
+  const [searching, setSearching] = useState(false);
+
   useEffect(() => {
     loadSettings();
+    loadEmployeeAccess();
   }, []);
 
   const loadSettings = async () => {
     try {
       setLoading(true);
-      // In a real app, this would fetch from API
-      // const data = await apiCall('/api/admin/settings');
-      // setSettings(data);
-      setOriginalSettings(JSON.parse(JSON.stringify(settings)));
+      const data = await apiCall('/api/admin/settings');
+      
+      if (data.success && data.settings) {
+        const loadedSettings = {
+          company: {
+            name: data.settings.company?.company_name || 'YellowStone Xps',
+            registrationNumber: data.settings.company?.company_registration || 'U72900PB2020PTC051260',
+            address: data.settings.company?.company_address || '',
+            phone: data.settings.company?.company_phone || '',
+            email: data.settings.company?.company_email || '',
+            website: data.settings.company?.company_website || '',
+            logo: null
+          },
+          email: {
+            smtpServer: data.settings.email?.smtp_server || 'smtp.gmail.com',
+            smtpPort: data.settings.email?.smtp_port || '587',
+            username: data.settings.email?.smtp_username || '',
+            password: data.settings.email?.smtp_password || '',
+            fromName: data.settings.email?.from_name || 'YellowStone XPs',
+            replyTo: data.settings.email?.reply_to || '',
+            testEmail: ''
+          },
+          security: settings.security,
+          notifications: settings.notifications,
+          system: settings.system,
+          integrations: settings.integrations
+        };
+        
+        setSettings(loadedSettings);
+        setOriginalSettings(JSON.parse(JSON.stringify(loadedSettings)));
+      }
     } catch (error) {
       console.error('Error loading settings:', error);
       showNotification('Failed to load settings', 'error');
@@ -95,11 +130,35 @@ const SettingsView = ({ showNotification }) => {
   const saveSettings = async () => {
     try {
       setSaving(true);
-      // In a real app, this would save to API
-      // await apiCall('/api/admin/settings', {
-      //   method: 'PUT',
-      //   body: JSON.stringify(settings)
-      // });
+      
+      // Prepare settings for API
+      const settingsToSave = {
+        company: {
+          company_name: settings.company.name,
+          company_registration: settings.company.registrationNumber,
+          company_address: settings.company.address,
+          company_phone: settings.company.phone,
+          company_email: settings.company.email,
+          company_website: settings.company.website
+        },
+        email: {
+          smtp_server: settings.email.smtpServer,
+          smtp_port: settings.email.smtpPort,
+          smtp_username: settings.email.username,
+          smtp_password: settings.email.password,
+          from_name: settings.email.fromName,
+          reply_to: settings.email.replyTo
+        },
+        security: settings.security,
+        notifications: settings.notifications,
+        system: settings.system,
+        integrations: settings.integrations
+      };
+      
+      await apiCall('/api/admin/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ settings: settingsToSave })
+      });
       
       setOriginalSettings(JSON.parse(JSON.stringify(settings)));
       showNotification('Settings saved successfully', 'success');
@@ -130,15 +189,158 @@ const SettingsView = ({ showNotification }) => {
   const testEmailConnection = async () => {
     try {
       setLoading(true);
-      // await apiCall('/api/admin/test-email', {
-      //   method: 'POST',
-      //   body: JSON.stringify({ testEmail: settings.email.testEmail })
-      // });
-      showNotification('Email test sent successfully', 'success');
+      console.log('Test email value:', settings.email.testEmail);
+      if (!settings.email.testEmail || settings.email.testEmail.trim() === '') {
+        showNotification('Please enter a test email address first', 'error');
+        setLoading(false);
+        return;
+      }
+      await apiCall('/api/admin/settings/test-email', {
+        method: 'POST',
+        body: JSON.stringify({ email: settings.email.testEmail })
+      });
+      showNotification('Test email sent successfully', 'success');
+      setSettings(prev => ({
+        ...prev,
+        email: { ...prev.email, testEmail: '' }
+      }));
     } catch (error) {
       showNotification('Email test failed', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Employee Access Functions
+  const loadEmployeeAccess = async () => {
+    try {
+      const data = await apiCall('/api/admin/employee-access');
+      if (data.success && data.employees) {
+        setEmployees(data.employees);
+      }
+    } catch (error) {
+      console.error('Error loading employee access:', error);
+      showNotification('Failed to load employee access', 'error');
+    }
+  };
+
+  const updateEmployeeAccess = async (employeeId, accessType, hasAccess) => {
+    try {
+      await apiCall(`/api/admin/employee-access/${employeeId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          access_type: accessType,
+          has_access: hasAccess
+        })
+      });
+      
+      // Update local state
+      setEmployees(prevEmployees =>
+        prevEmployees.map(emp =>
+          emp.id === employeeId
+            ? { ...emp, access: { ...emp.access, [accessType]: hasAccess } }
+            : emp
+        )
+      );
+      
+      // Update selected employee if it's the same
+      if (selectedEmployee && selectedEmployee.id === employeeId) {
+        setSelectedEmployee({
+          ...selectedEmployee,
+          access: { ...selectedEmployee.access, [accessType]: hasAccess }
+        });
+      }
+      
+      showNotification('Access updated successfully', 'success');
+    } catch (error) {
+      console.error('Error updating employee access:', error);
+      showNotification('Failed to update employee access', 'error');
+    }
+  };
+
+  const searchEmployee = async () => {
+    if (!selectedEmployeeId.trim()) {
+      showNotification('Please enter an employee ID', 'error');
+      return;
+    }
+
+    setSearching(true);
+    try {
+      const data = await apiCall('/api/admin/employee-access');
+      if (data.success && data.employees) {
+        const employee = data.employees.find(
+          emp => emp.employee_id === selectedEmployeeId.trim() || emp.id.toString() === selectedEmployeeId.trim()
+        );
+        
+        if (employee) {
+          setSelectedEmployee(employee);
+          setSearchTerm(selectedEmployeeId.trim());
+        } else {
+          showNotification('Employee not found', 'error');
+          setSelectedEmployee(null);
+        }
+      }
+    } catch (error) {
+      console.error('Error searching employee:', error);
+      showNotification('Failed to search employee', 'error');
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const grantAccess = async (accessType) => {
+    if (!selectedEmployee) {
+      showNotification('Please select an employee first', 'error');
+      return;
+    }
+
+    try {
+      await updateEmployeeAccess(selectedEmployee.id, accessType, true);
+    } catch (error) {
+      console.error('Error granting access:', error);
+      showNotification('Failed to grant access', 'error');
+    }
+  };
+
+  const handleRemoveSingleAccess = async (employeeId, employeeName, accessType, accessTypeName) => {
+    if (!window.confirm(`Are you sure you want to remove ${accessTypeName} access from ${employeeName}?`)) {
+      return;
+    }
+
+    try {
+      await updateEmployeeAccess(employeeId, accessType, false);
+      showNotification(`${accessTypeName} access removed from ${employeeName}`, 'success');
+      loadEmployeeAccess();
+    } catch (error) {
+      console.error('Error removing access:', error);
+      showNotification('Failed to remove access', 'error');
+    }
+  };
+
+  const handleRemoveAllAccess = async (employeeId, employeeName) => {
+    if (!window.confirm(`Are you sure you want to remove all access permissions from ${employeeName}?`)) {
+      return;
+    }
+
+    try {
+      // Remove each access type
+      if (employees.find(emp => emp.id === employeeId)?.access?.send_nda) {
+        await updateEmployeeAccess(employeeId, 'send_nda', false);
+      }
+      if (employees.find(emp => emp.id === employeeId)?.access?.send_leads) {
+        await updateEmployeeAccess(employeeId, 'send_leads', false);
+      }
+      if (employees.find(emp => emp.id === employeeId)?.access?.hr_access) {
+        await updateEmployeeAccess(employeeId, 'hr_access', false);
+      }
+      
+      showNotification(`All access permissions removed from ${employeeName}`, 'success');
+      
+      // Reload the employee access list to reflect changes
+      loadEmployeeAccess();
+    } catch (error) {
+      console.error('Error removing access:', error);
+      showNotification('Failed to remove access', 'error');
     }
   };
 
@@ -174,7 +376,7 @@ const SettingsView = ({ showNotification }) => {
   const settingsTabs = [
     { id: 'company', label: 'Company Profile', icon: Building },
     { id: 'email', label: 'Email Configuration', icon: Mail },
-    { id: 'security', label: 'Security & Access', icon: Shield },
+    { id: 'access', label: 'Employee Access', icon: Users },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'system', label: 'System Preferences', icon: Database },
     { id: 'integrations', label: 'Integrations', icon: Globe }
@@ -480,7 +682,237 @@ const SettingsView = ({ showNotification }) => {
             </div>
           )}
 
-          {/* Security Settings */}
+          {/* Employee Access Control */}
+          {activeTab === 'access' && (
+            <div className="space-y-6">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-xl font-semibold text-gray-900">Employee Access Management</h2>
+                  <p className="text-sm text-gray-600 mt-1">Grant specific access permissions to employees</p>
+                </div>
+              </div>
+
+              {/* Employee Search */}
+              <div className="bg-white p-6 rounded-lg border border-gray-200">
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Enter Employee ID</label>
+                    <input
+                      type="text"
+                      placeholder="Employee ID or Employee Code"
+                      value={selectedEmployeeId}
+                      onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && searchEmployee()}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <button
+                      onClick={searchEmployee}
+                      disabled={searching || !selectedEmployeeId.trim()}
+                      className="px-6 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {searching ? 'Searching...' : 'Search'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Selected Employee Info */}
+                {selectedEmployee && (
+                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{selectedEmployee.name}</h3>
+                        <p className="text-sm text-gray-600">{selectedEmployee.email}</p>
+                        {selectedEmployee.employee_code && (
+                          <p className="text-xs text-gray-500">ID: {selectedEmployee.employee_code}</p>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedEmployee.access?.send_nda && (
+                          <span className="px-3 py-1 bg-green-100 text-green-800 text-xs rounded-full">NDA Access</span>
+                        )}
+                        {selectedEmployee.access?.send_leads && (
+                          <span className="px-3 py-1 bg-blue-100 text-blue-800 text-xs rounded-full">Leads Access</span>
+                        )}
+                        {selectedEmployee.access?.hr_access && (
+                          <span className="px-3 py-1 bg-purple-100 text-purple-800 text-xs rounded-full">HR Access</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Access Grant Buttons */}
+              {selectedEmployee && (
+                <div className="bg-white p-6 rounded-lg border border-gray-200">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Grant Access Permissions</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* NDA Access */}
+                    <div className="border border-gray-200 rounded-lg p-4 hover:border-amber-500 transition-colors">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h4 className="font-semibold text-gray-900">NDA Access</h4>
+                          <p className="text-xs text-gray-500 mt-1">Send & view NDA forms</p>
+                        </div>
+                        {selectedEmployee.access?.send_nda ? (
+                          <CheckCircle className="text-green-500" size={24} />
+                        ) : (
+                          <Lock className="text-gray-400" size={24} />
+                        )}
+                      </div>
+                      <button
+                        onClick={() => grantAccess('send_nda')}
+                        disabled={selectedEmployee.access?.send_nda}
+                        className="w-full px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {selectedEmployee.access?.send_nda ? 'Already Granted' : 'Grant NDA Access'}
+                      </button>
+                    </div>
+
+                    {/* Lead Generation Access */}
+                    <div className="border border-gray-200 rounded-lg p-4 hover:border-amber-500 transition-colors">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h4 className="font-semibold text-gray-900">Lead Generation Access</h4>
+                          <p className="text-xs text-gray-500 mt-1">Create, send & manage leads</p>
+                        </div>
+                        {selectedEmployee.access?.send_leads ? (
+                          <CheckCircle className="text-green-500" size={24} />
+                        ) : (
+                          <Lock className="text-gray-400" size={24} />
+                        )}
+                      </div>
+                      <button
+                        onClick={() => grantAccess('send_leads')}
+                        disabled={selectedEmployee.access?.send_leads}
+                        className="w-full px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {selectedEmployee.access?.send_leads ? 'Already Granted' : 'Grant Leads Access'}
+                      </button>
+                    </div>
+
+                    {/* HR Access */}
+                    <div className="border border-gray-200 rounded-lg p-4 hover:border-amber-500 transition-colors">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h4 className="font-semibold text-gray-900">HR Access</h4>
+                          <p className="text-xs text-gray-500 mt-1">Manage employees & attendance</p>
+                        </div>
+                        {selectedEmployee.access?.hr_access ? (
+                          <CheckCircle className="text-green-500" size={24} />
+                        ) : (
+                          <Lock className="text-gray-400" size={24} />
+                        )}
+                      </div>
+                      <button
+                        onClick={() => grantAccess('hr_access')}
+                        disabled={selectedEmployee.access?.hr_access}
+                        className="w-full px-4 py-2 bg-purple-500 text-white rounded-lg hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {selectedEmployee.access?.hr_access ? 'Already Granted' : 'Grant HR Access'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* All Employees with Access - Table View */}
+              {employees.length > 0 && (
+                <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                  <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                    <h3 className="text-lg font-semibold text-gray-900">All Employees with Special Access</h3>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">NDA</th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Leads</th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">HR</th>
+                          <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {employees
+                          .filter(emp => emp.access?.send_nda || emp.access?.send_leads || emp.access?.hr_access)
+                          .map((employee) => (
+                            <tr key={employee.id} className="hover:bg-gray-50">
+                              <td className="px-6 py-4">
+                                <div className="text-sm font-medium text-gray-900">{employee.name}</div>
+                                <div className="text-xs text-gray-500">{employee.email}</div>
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                {employee.access?.send_nda ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <CheckCircle className="text-green-500" size={20} />
+                                    <button
+                                      onClick={() => handleRemoveSingleAccess(employee.id, employee.name, 'send_nda', 'NDA')}
+                                      className="text-xs text-red-600 hover:text-red-800 font-medium"
+                                      title="Remove NDA access"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                {employee.access?.send_leads ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <CheckCircle className="text-green-500" size={20} />
+                                    <button
+                                      onClick={() => handleRemoveSingleAccess(employee.id, employee.name, 'send_leads', 'Leads')}
+                                      className="text-xs text-red-600 hover:text-red-800 font-medium"
+                                      title="Remove Leads access"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                {employee.access?.hr_access ? (
+                                  <div className="flex flex-col items-center gap-1">
+                                    <CheckCircle className="text-green-500" size={20} />
+                                    <button
+                                      onClick={() => handleRemoveSingleAccess(employee.id, employee.name, 'hr_access', 'HR')}
+                                      className="text-xs text-red-600 hover:text-red-800 font-medium"
+                                      title="Remove HR access"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                <button
+                                  onClick={() => handleRemoveAllAccess(employee.id, employee.name)}
+                                  className="inline-flex items-center px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 rounded-lg hover:bg-red-100 transition-colors"
+                                  title="Remove all access permissions"
+                                >
+                                  <X size={14} className="mr-1" />
+                                  Remove All
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Old Security Settings - Keeping for reference but not accessible */}
           {activeTab === 'security' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

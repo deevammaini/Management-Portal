@@ -8,6 +8,10 @@ import {
   Target, Database, CheckCircle, RefreshCw, ChevronDown, ChevronRight
 } from 'lucide-react';
 import { apiCall } from '../utils/api';
+import NDAFormsView from './NDAFormsView';
+import SendNDAModal from './SendNDAModal';
+import GenerateLeadsView from './GenerateLeadsView';
+import AttendanceView from './AttendanceView';
 
 const EmployeeDashboard = ({ user, onLogout }) => {
   const [notifications, setNotifications] = useState([]);
@@ -77,6 +81,13 @@ const EmployeeDashboard = ({ user, onLogout }) => {
     skills: '',
     bio: ''
   });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
   const [leadGenSubTab, setLeadGenSubTab] = useState('leads');
   const [searchTerm, setSearchTerm] = useState('');
   const [leadGenExpanded, setLeadGenExpanded] = useState(false);
@@ -100,6 +111,12 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   });
   const [selectedReport, setSelectedReport] = useState(null);
   const [showReportModal, setShowReportModal] = useState(false);
+  const [employeeAccess, setEmployeeAccess] = useState({
+    send_nda: false,
+    send_leads: false,
+    hr_access: false
+  });
+  const [showSendNDAModal, setShowSendNDAModal] = useState(false);
 
   // Holiday data
   const holidays = [
@@ -115,8 +132,25 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   useEffect(() => {
     if (user && user.id) {
     loadData();
+    loadAccessPermissions();
     }
   }, [user?.id]);
+
+  // Refresh access permissions every 10 seconds
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    const interval = setInterval(() => {
+      loadAccessPermissions();
+    }, 10000); // Poll every 10 seconds
+    
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  // Debug: Log employeeAccess state changes
+  useEffect(() => {
+    console.log('📊 Current employeeAccess state:', employeeAccess);
+  }, [employeeAccess]);
 
   // Auto-expand Lead Generation when active
   useEffect(() => {
@@ -350,6 +384,25 @@ const EmployeeDashboard = ({ user, onLogout }) => {
     setTimeout(() => setNotification(null), 3000);
   };
 
+  const handleSendNDA = async (data) => {
+    try {
+      const response = await apiCall('/api/admin/send-nda', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      });
+      
+      if (response.success) {
+        showNotification('NDA sent successfully!', 'success');
+        setShowSendNDAModal(false);
+      } else {
+        showNotification(response.error || 'Failed to send NDA', 'error');
+      }
+    } catch (error) {
+      console.error('Error sending NDA:', error);
+      showNotification('Failed to send NDA', 'error');
+    }
+  };
+
   const loadAttendanceStatus = async () => {
     try {
       const response = await apiCall(`/api/employee/attendance/status?employee_id=${user.id}`);
@@ -358,6 +411,39 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       }
     } catch (error) {
       console.error('Error loading attendance status:', error);
+    }
+  };
+
+  const loadAccessPermissions = async () => {
+    try {
+      const response = await apiCall(`/api/employee/access-permissions?employee_id=${user.id}`);
+      
+      console.log('🔍 Access permissions response:', response);
+      console.log('🔍 Full response object:', JSON.stringify(response, null, 2));
+      
+      if (response.success && response.access) {
+        console.log('✅ Setting employee access:', response.access);
+        console.log('✅ send_leads:', response.access.send_leads);
+        console.log('✅ send_nda:', response.access.send_nda);
+        console.log('✅ hr_access:', response.access.hr_access);
+        setEmployeeAccess(response.access);
+      } else {
+        console.log('⚠️ Response does not have expected format:', response);
+        // Default to false if no access
+        setEmployeeAccess({
+          send_nda: false,
+          send_leads: false,
+          hr_access: false
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error loading employee access permissions:', error);
+      // Default to false on error
+      setEmployeeAccess({
+        send_nda: false,
+        send_leads: false,
+        hr_access: false
+      });
     }
   };
 
@@ -479,10 +565,59 @@ const EmployeeDashboard = ({ user, onLogout }) => {
         category: 'general',
         priority: 'medium'
       });
-      loadData(); // Reload data to show the new ticket
+      
+      window.location.reload();
     } catch (error) {
       console.error('Error creating ticket:', error);
-      alert('Failed to create ticket. Please try again.');
+    }
+  };
+
+  const handleChangePassword = async () => {
+    setPasswordError('');
+    setPasswordSuccess('');
+    
+    // Validate inputs
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
+      setPasswordError('All fields are required');
+      return;
+    }
+    
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError('New passwords do not match');
+      return;
+    }
+    
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordError('Password must be at least 6 characters long');
+      return;
+    }
+    
+    try {
+      const response = await apiCall('/api/employee/change-password', {
+        method: 'POST',
+        body: JSON.stringify({
+          employee_id: user.id,
+          current_password: passwordForm.currentPassword,
+          new_password: passwordForm.newPassword
+        })
+      });
+      
+      if (response.success) {
+        setPasswordSuccess('Password changed successfully');
+        setPasswordForm({
+          currentPassword: '',
+          newPassword: '',
+          confirmPassword: ''
+        });
+        setTimeout(() => {
+          setShowSettings(false);
+        }, 2000);
+      } else {
+        setPasswordError(response.message || 'Failed to change password');
+      }
+    } catch (error) {
+      console.error('Error changing password:', error);
+      setPasswordError('Failed to change password. Please try again.');
     }
   };
 
@@ -900,7 +1035,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
               </button>
             ))}
 
-            {/* Lead Generation - Expandable */}
+            {/* Lead Generation - Expandable (Visible to all employees) */}
             <div className="space-y-1">
               <button
                 onClick={() => setLeadGenExpanded(!leadGenExpanded)}
@@ -920,21 +1055,6 @@ const EmployeeDashboard = ({ user, onLogout }) => {
               {/* Sub-menu items */}
               {leadGenExpanded && (
                 <div className="ml-4 space-y-1 border-l-2 border-gray-200 pl-2">
-                  <button
-                    onClick={() => {
-                      setActiveTab('leadgeneration');
-                      setLeadGenSubTab('leads');
-                      setSidebarOpen(false);
-                    }}
-                    className={`w-full flex items-center gap-3 px-4 py-2 rounded-lg text-sm transition-colors ${
-                      activeTab === 'leadgeneration' && leadGenSubTab === 'leads'
-                        ? 'bg-amber-50 text-amber-600 font-medium'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                    }`}
-                  >
-                    <Database size={16} />
-                    Leads
-                  </button>
                   <button
                     onClick={() => {
                       setActiveTab('leadgeneration');
@@ -983,6 +1103,42 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                 </div>
               )}
             </div>
+
+            {/* Generate Leads - Only show if employee has leads access */}
+            {employeeAccess.send_leads && (
+              <button
+                onClick={() => {
+                  setActiveTab('generateleads');
+                  setSidebarOpen(false);
+                }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  activeTab === 'generateleads'
+                    ? 'bg-gradient-to-r from-amber-50 to-orange-50 text-amber-600 border-r-2 border-amber-500'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`}
+              >
+                <Database size={20} />
+                Generate Leads
+              </button>
+            )}
+
+            {/* NDA Management - Only show if employee has NDA access */}
+            {employeeAccess.send_nda && (
+              <button
+                onClick={() => {
+                  setActiveTab('nda');
+                  setSidebarOpen(false);
+                }}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  activeTab === 'nda'
+                    ? 'bg-gradient-to-r from-amber-50 to-orange-50 text-amber-600 border-r-2 border-amber-500'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                }`}
+              >
+                <FileText size={20} />
+                NDA Management
+              </button>
+            )}
 
             {/* Profile */}
             <button
@@ -1659,8 +1815,91 @@ const EmployeeDashboard = ({ user, onLogout }) => {
           </div>
         )}
 
-          {/* Attendance Tab */}
-        {activeTab === 'attendance' && (
+          {/* Attendance Tab - For HR Access: Show both personal clock-in/out and all employees attendance */}
+        {activeTab === 'attendance' && employeeAccess.hr_access && (
+          <div className="space-y-6">
+            {/* Personal Clock In/Out Section for HR Employees */}
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">Your Attendance</h2>
+              <div className="text-center">
+                <div className="w-24 h-24 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Clock className="h-12 w-12 text-white" />
+                </div>
+                <h3 className="text-lg font-semibold mb-2">Today's Attendance</h3>
+                <p className="text-gray-600 mb-6">Working Hours: 9:30 AM - 6:30 PM</p>
+                
+                <div className="flex justify-center gap-4">
+                  <button
+                    onClick={handleClockIn}
+                    disabled={attendanceStatus.clocked_in && !attendanceStatus.clocked_out}
+                    className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
+                      attendanceStatus.clocked_in && !attendanceStatus.clocked_out
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-green-500 text-white hover:bg-green-600'
+                    }`}
+                  >
+                    {attendanceStatus.clocked_in && !attendanceStatus.clocked_out ? 'Already Clocked In' : 'Clock In'}
+                  </button>
+                  <button
+                    onClick={handleClockOut}
+                    disabled={!attendanceStatus.clocked_in || attendanceStatus.clocked_out}
+                    className={`px-8 py-3 rounded-lg font-semibold transition-colors ${
+                      !attendanceStatus.clocked_in || attendanceStatus.clocked_out
+                        ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                        : 'bg-red-500 text-white hover:bg-red-600'
+                    }`}
+                    title={!attendanceStatus.clocked_in ? 'You must clock in first' : attendanceStatus.clocked_out ? 'Already clocked out - clock in again to continue' : 'Click to clock out'}
+                  >
+                    {attendanceStatus.clocked_out ? 'Clock In Again' : 'Clock Out'}
+                  </button>
+                </div>
+
+                {/* Current Status */}
+                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <span className="text-gray-600">Clock In:</span>
+                      <span className="ml-2 font-medium">
+                        {attendanceStatus.clock_in_time || 'Not clocked in'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Clock Out:</span>
+                      <span className="ml-2 font-medium">
+                        {attendanceStatus.clock_out_time || 'Not clocked out'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Status:</span>
+                      <span className={`ml-2 px-2 py-1 rounded-full text-xs font-semibold ${
+                        attendanceStatus.status === 'Present' ? 'bg-green-100 text-green-800' :
+                        attendanceStatus.status === 'Late' ? 'bg-yellow-100 text-yellow-800' :
+                        attendanceStatus.status === 'Half Day' ? 'bg-orange-100 text-orange-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {attendanceStatus.status}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-gray-600">Total Hours:</span>
+                      <span className="ml-2 font-medium">
+                        {attendanceStatus.total_hours}h
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* All Employees Attendance View for HR */}
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <h2 className="text-xl font-bold text-gray-900 mb-4">All Employees Attendance</h2>
+              <AttendanceView showNotification={showNotification} />
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'attendance' && !employeeAccess.hr_access && (
           <div className="space-y-6">
             {/* Attendance Header */}
             <div className="bg-white rounded-xl shadow-sm border p-6">
@@ -1811,30 +2050,11 @@ const EmployeeDashboard = ({ user, onLogout }) => {
           </div>
         )}
 
-          {/* Lead Generation Tab */}
+          {/* Lead Generation Tab - Assigned Leads (Visible to all employees) */}
           {activeTab === 'leadgeneration' && (
             <div className="space-y-6">
               <div className="bg-white rounded-xl shadow-sm border">
-                {/* Leads Sub-tab */}
-                {leadGenSubTab === 'leads' && (
-                  <div className="p-6">
-                    <div className="flex items-center justify-between mb-6">
-                      <h3 className="text-lg font-semibold">All Leads</h3>
-                      <button className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 flex items-center gap-2">
-                        <Plus size={18} />
-                        Add New Lead
-                      </button>
-                    </div>
-                    
-                    <div className="bg-gray-50 rounded-lg p-8 text-center">
-                      <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                      <h4 className="text-lg font-medium text-gray-900 mb-2">No Leads Yet</h4>
-                      <p className="text-gray-500">Start adding leads to track your sales pipeline</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Assigned Leads Sub-tab */}
+                {/* Assigned Leads - Only sub-tab for Lead Generation */}
                 {leadGenSubTab === 'assigned' && (
                   <div className="p-6">
                     <div className="flex items-center justify-between mb-6">
@@ -1853,11 +2073,11 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
                       </div>
                     ) : assignedLeads.length === 0 ? (
-                      <div className="bg-gray-50 rounded-lg p-8 text-center">
-                        <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <div className="bg-gray-50 rounded-lg p-8 text-center">
+                      <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                         <h4 className="text-lg font-medium text-gray-900 mb-2">No Assigned Leads</h4>
                         <p className="text-gray-500">You don't have any leads assigned to you yet</p>
-                      </div>
+                    </div>
                     ) : (
                       <div className="space-y-4">
                         {assignedLeads.map((lead) => (
@@ -2220,7 +2440,36 @@ const EmployeeDashboard = ({ user, onLogout }) => {
             </div>
           )}
 
-          {/* Profile Tab */}
+          {/* Generate Leads Tab - Only for employees with access */}
+          {activeTab === 'generateleads' && employeeAccess.send_leads && (
+            <GenerateLeadsView showNotification={showNotification} user={user} isEmployee={false} />
+          )}
+
+          {/* NDA Management Tab */}
+        {activeTab === 'nda' && employeeAccess.send_nda && (
+          <div className="space-y-6">
+            {/* Add a "Send NDA" button at the top */}
+            <div className="bg-white rounded-xl shadow-sm border p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">NDA Management</h2>
+                  <p className="text-gray-600 mt-1">Send and manage NDA forms for vendors</p>
+                </div>
+                <button
+                  onClick={() => setShowSendNDAModal(true)}
+                  className="px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-lg hover:from-amber-600 hover:to-amber-700 font-medium flex items-center gap-2"
+                >
+                  <FileText size={20} />
+                  Send NDA
+                </button>
+              </div>
+            </div>
+            
+            {/* NDA Forms View */}
+            <NDAFormsView showNotification={showNotification} />
+          </div>
+        )}
+
         {activeTab === 'profile' && (
           <div className="space-y-6">
               {/* Profile Overview */}
@@ -2607,10 +2856,33 @@ const EmployeeDashboard = ({ user, onLogout }) => {
               </div>
             </div>
             <div className="p-6 space-y-4">
+              {passwordError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
+                  {passwordError}
+                </div>
+              )}
+              {passwordSuccess && (
+                <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
+                  {passwordSuccess}
+                </div>
+              )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Change Password</label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Current Password</label>
                 <input
                   type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={(e) => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
+                  placeholder="Enter current password"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+            </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">New Password</label>
+                <input
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
                   placeholder="Enter new password"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
@@ -2620,6 +2892,8 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                 <label className="block text-sm font-medium text-gray-700 mb-2">Confirm Password</label>
                 <input
                   type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
                   placeholder="Confirm new password"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
@@ -2651,10 +2925,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                 Cancel
               </button>
               <button
-                onClick={() => {
-                  setShowSettings(false);
-                  // Handle settings save
-                }}
+                onClick={handleChangePassword}
                 className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
               >
                 Save Changes
@@ -2996,6 +3267,14 @@ const EmployeeDashboard = ({ user, onLogout }) => {
               </form>
             </div>
           </div>
+        )}
+
+        {/* Send NDA Modal */}
+        {showSendNDAModal && (
+          <SendNDAModal
+            onClose={() => setShowSendNDAModal(false)}
+            onSend={handleSendNDA}
+          />
         )}
     </div>
   );

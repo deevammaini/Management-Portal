@@ -8,8 +8,57 @@ import {
 import { apiCall } from '../utils/api';
 import { useSocket } from '../contexts/SocketContext';
 
-const GenerateLeadsView = ({ showNotification }) => {
+const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
   const socket = useSocket();
+  
+  // Helper function to format datetime strings
+  const formatDateTime = (dateTimeString) => {
+    if (!dateTimeString) return 'Not available';
+    
+    console.log('Formatting datetime:', dateTimeString, 'Type:', typeof dateTimeString);
+    
+    try {
+      // Handle different possible formats
+      let date, time;
+      
+      if (typeof dateTimeString === 'string') {
+        if (dateTimeString.includes(' ')) {
+          // Format: YYYY-MM-DD HH:MM:SS
+          [date, time] = dateTimeString.split(' ');
+        } else if (dateTimeString.includes('T')) {
+          // Format: YYYY-MM-DDTHH:MM:SS
+          [date, time] = dateTimeString.split('T');
+        } else {
+          // Try to parse as a date string
+          const parsedDate = new Date(dateTimeString);
+          if (!isNaN(parsedDate.getTime())) {
+            const year = parsedDate.getFullYear();
+            const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+            const day = String(parsedDate.getDate()).padStart(2, '0');
+            const hours = String(parsedDate.getHours()).padStart(2, '0');
+            const minutes = String(parsedDate.getMinutes()).padStart(2, '0');
+            const seconds = String(parsedDate.getSeconds()).padStart(2, '0');
+            return `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`;
+          }
+          return 'Invalid format';
+        }
+        
+        if (date && time) {
+          const [year, month, day] = date.split('-');
+          const [hours, minutes, seconds] = time.split(':');
+          
+          if (year && month && day && hours && minutes && seconds) {
+            return `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`;
+          }
+        }
+      }
+      
+      return 'Invalid format';
+    } catch (error) {
+      console.error('Error formatting datetime:', error);
+      return 'Format error';
+    }
+  };
   const [leads, setLeads] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +92,7 @@ const GenerateLeadsView = ({ showNotification }) => {
     scheduled_time: '',
     batch_size: 10,
     batch_interval: 10,
+    email_type: 'intro'
   });
   const [selectedLead, setSelectedLead] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -50,6 +100,9 @@ const GenerateLeadsView = ({ showNotification }) => {
   const [employeeFilter, setEmployeeFilter] = useState('all');
   const [sortBy, setSortBy] = useState('created_at');
   const [sortOrder, setSortOrder] = useState('desc');
+  const [showProgressUpdates, setShowProgressUpdates] = useState(false);
+  const [progressUpdates, setProgressUpdates] = useState([]);
+  const [selectedLeadForUpdates, setSelectedLeadForUpdates] = useState(null);
 
   const fetchScheduledEmails = useCallback(async () => {
     try {
@@ -180,20 +233,33 @@ const GenerateLeadsView = ({ showNotification }) => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [leadsData, employeesData, companiesData, emailsData] = await Promise.all([
-        apiCall('/api/admin/leads'),
-        apiCall('/api/admin/employees'),
-        apiCall('/api/admin/companies'),
-        apiCall('/api/admin/scheduled-emails')
-      ]);
       
-      console.log('🔍 Debug: Leads data received:', leadsData);
-      console.log('🔍 Debug: Priority values:', leadsData?.map(lead => ({ id: lead.id, priority: lead.priority })));
-      
-      setLeads(leadsData || []);
-      setEmployees(employeesData || []);
-      setCompanies(companiesData?.companies || []);
-      setScheduledEmails(emailsData?.emails || []);
+      if (isEmployee) {
+        // For employees, only load assigned leads
+        const leadsData = await apiCall(`/api/employee/assigned-leads?employee_id=${user?.id}`);
+        console.log('🔍 Debug: Employee assigned leads data received:', leadsData);
+        // The employee endpoint returns {success: true, leads: [...]}
+        setLeads(leadsData?.leads || []);
+        setEmployees([]);
+        setCompanies([]);
+        setScheduledEmails([]);
+      } else {
+        // For admins, load all data
+        const [leadsData, employeesData, companiesData, emailsData] = await Promise.all([
+          apiCall('/api/admin/leads'),
+          apiCall('/api/admin/employees'),
+          apiCall('/api/admin/companies'),
+          apiCall('/api/admin/scheduled-emails')
+        ]);
+        
+        console.log('🔍 Debug: Leads data received:', leadsData);
+        console.log('🔍 Debug: Priority values:', leadsData?.map(lead => ({ id: lead.id, priority: lead.priority })));
+        
+        setLeads(leadsData || []);
+        setEmployees(employeesData || []);
+        setCompanies(companiesData?.companies || []);
+        setScheduledEmails(emailsData?.emails || []);
+      }
     } catch (error) {
       console.error('Error loading data:', error);
       showNotification('Failed to load data', 'error');
@@ -319,31 +385,76 @@ const GenerateLeadsView = ({ showNotification }) => {
   const handleBulkScheduleEmails = async (e) => {
     e.preventDefault();
     try {
-      const response = await apiCall('/api/admin/scheduled-emails/bulk', {
-        method: 'POST',
-        body: JSON.stringify({
-          company_ids: selectedCompanies,
-          scheduled_time: bulkScheduleForm.scheduled_time,
-          batch_size: bulkScheduleForm.batch_size,
-          batch_interval: bulkScheduleForm.batch_interval
-        })
-      });
-      
-      const totalBatches = Math.ceil(selectedCompanies.length / bulkScheduleForm.batch_size);
-      const totalDuration = (totalBatches - 1) * bulkScheduleForm.batch_interval;
-      
-      showNotification(
-        `${selectedCompanies.length} emails scheduled in ${totalBatches} batches over ${totalDuration} minutes!`, 
-        'success'
-      );
-      setShowBulkScheduleModal(false);
-      setSelectedCompanies([]);
-      setBulkScheduleForm({ 
-        scheduled_time: '', 
-        batch_size: 10, 
-        batch_interval: 10 
-      });
-      loadData();
+      // If there's an attachment, use FormData and direct fetch
+      if (bulkScheduleForm.attachment) {
+        const formData = new FormData();
+        formData.append('company_ids', JSON.stringify(selectedCompanies));
+        formData.append('scheduled_time', bulkScheduleForm.scheduled_time);
+        formData.append('batch_size', bulkScheduleForm.batch_size.toString());
+        formData.append('batch_interval', bulkScheduleForm.batch_interval.toString());
+        formData.append('email_type', bulkScheduleForm.email_type || 'intro');
+        formData.append('attachment', bulkScheduleForm.attachment);
+        
+        const response = await fetch('http://localhost:8000/api/admin/scheduled-emails/bulk', {
+          method: 'POST',
+          body: formData,
+          credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+          const totalBatches = Math.ceil(selectedCompanies.length / bulkScheduleForm.batch_size);
+          const totalDuration = (totalBatches - 1) * bulkScheduleForm.batch_interval;
+          
+          showNotification(
+            `${selectedCompanies.length} emails scheduled in ${totalBatches} batches over ${totalDuration} minutes!`, 
+            'success'
+          );
+          setShowBulkScheduleModal(false);
+          setSelectedCompanies([]);
+          setBulkScheduleForm({ 
+            scheduled_time: '', 
+            batch_size: 10, 
+            batch_interval: 10,
+            email_type: 'intro',
+            attachment: null
+          });
+          loadData();
+        } else {
+          showNotification(data.error || 'Failed to schedule bulk emails', 'error');
+        }
+      } else {
+        // No attachment, use JSON
+        const response = await apiCall('/api/admin/scheduled-emails/bulk', {
+          method: 'POST',
+          body: JSON.stringify({
+            company_ids: selectedCompanies,
+            scheduled_time: bulkScheduleForm.scheduled_time,
+            batch_size: bulkScheduleForm.batch_size,
+            batch_interval: bulkScheduleForm.batch_interval,
+            email_type: bulkScheduleForm.email_type || 'intro'
+          })
+        });
+        
+        const totalBatches = Math.ceil(selectedCompanies.length / bulkScheduleForm.batch_size);
+        const totalDuration = (totalBatches - 1) * bulkScheduleForm.batch_interval;
+        
+        showNotification(
+          `${selectedCompanies.length} emails scheduled in ${totalBatches} batches over ${totalDuration} minutes!`, 
+          'success'
+        );
+        setShowBulkScheduleModal(false);
+        setSelectedCompanies([]);
+        setBulkScheduleForm({ 
+          scheduled_time: '', 
+          batch_size: 10, 
+          batch_interval: 10,
+          email_type: 'intro',
+          attachment: null
+        });
+        loadData();
+      }
     } catch (error) {
       console.error('Error scheduling bulk emails:', error);
       showNotification('Failed to schedule bulk emails', 'error');
@@ -526,6 +637,20 @@ const GenerateLeadsView = ({ showNotification }) => {
     }
   };
 
+  const handleViewProgressUpdates = async (lead) => {
+    try {
+      const response = await apiCall(`/api/admin/leads/${lead.id}/progress-updates`);
+      if (response.success && response.updates) {
+        setProgressUpdates(response.updates);
+        setSelectedLeadForUpdates(lead);
+        setShowProgressUpdates(true);
+      }
+    } catch (error) {
+      console.error('Error fetching progress updates:', error);
+      showNotification('Failed to load progress updates', 'error');
+    }
+  };
+
   const handleUpdateLeadStatus = async (leadId, newStatus) => {
     try {
       await apiCall(`/api/admin/leads/${leadId}/status`, {
@@ -604,24 +729,26 @@ const GenerateLeadsView = ({ showNotification }) => {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Generate Leads</h1>
-          <p className="text-gray-600">Manage and assign leads to employees</p>
+          <p className="text-gray-600">{isEmployee ? 'View your assigned leads' : 'Manage and assign leads to employees'}</p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setShowEmailModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Mail size={20} />
-            Send Email for Lead Generation
-          </button>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-          >
-            <Plus size={20} />
-            Create New Lead
-          </button>
-        </div>
+        {!isEmployee && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowEmailModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Mail size={20} />
+              Send Email for Lead Generation
+            </button>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+            >
+              <Plus size={20} />
+              Create New Lead
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Stats Cards */}
@@ -653,7 +780,10 @@ const GenerateLeadsView = ({ showNotification }) => {
             <div>
               <p className="text-sm font-medium text-gray-600">Assigned Leads</p>
               <p className="text-2xl font-bold text-gray-900">
-                {leads.filter(lead => lead.assigned_to).length}
+                {isEmployee 
+                  ? leads.length // All leads in employee view are assigned to them
+                  : leads.filter(lead => lead.assigned_to).length
+                }
               </p>
             </div>
             <Users className="h-8 w-8 text-green-600" />
@@ -704,18 +834,20 @@ const GenerateLeadsView = ({ showNotification }) => {
             <option value="closed_lost">Closed Lost</option>
           </select>
           
-          <select
-            value={employeeFilter}
-            onChange={(e) => setEmployeeFilter(e.target.value)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-          >
-            <option value="all">All Employees</option>
-            {(employees || []).map(employee => (
-              <option key={employee.id} value={employee.id}>
-                {employee.name}
-              </option>
-            ))}
-          </select>
+          {!isEmployee && (
+            <select
+              value={employeeFilter}
+              onChange={(e) => setEmployeeFilter(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+            >
+              <option value="all">All Employees</option>
+              {(employees || []).map(employee => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.name}
+                </option>
+              ))}
+            </select>
+          )}
           
           <select
             value={`${sortBy}-${sortOrder}`}
@@ -811,7 +943,14 @@ const GenerateLeadsView = ({ showNotification }) => {
                     {/* Debug: {JSON.stringify({id: lead.id, priority: lead.priority})} */}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    {lead.assigned_to ? (
+                    {isEmployee ? (
+                      <div className="flex items-center">
+                        <User className="h-4 w-4 text-green-600 mr-2" />
+                        <span className="text-sm font-medium text-green-700">
+                          You
+                        </span>
+                      </div>
+                    ) : lead.assigned_to ? (
                       <div className="flex items-center">
                         <User className="h-4 w-4 text-gray-400 mr-2" />
                         <span className="text-sm text-gray-900">
@@ -834,25 +973,36 @@ const GenerateLeadsView = ({ showNotification }) => {
                     {new Date(lead.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => {
-                          setSelectedLead(lead);
-                          setShowAssignModal(true);
-                        }}
-                        className="text-amber-600 hover:text-amber-900"
-                        title="Assign Lead"
-                      >
-                        <Send size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteLead(lead.id)}
-                        className="text-red-600 hover:text-red-900"
-                        title="Delete Lead"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+                    {!isEmployee ? (
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => handleViewProgressUpdates(lead)}
+                          className="text-blue-600 hover:text-blue-900"
+                          title="View Progress Updates"
+                        >
+                          <Eye size={16} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedLead(lead);
+                            setShowAssignModal(true);
+                          }}
+                          className="text-amber-600 hover:text-amber-900"
+                          title="Assign Lead"
+                        >
+                          <Send size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteLead(lead.id)}
+                          className="text-red-600 hover:text-red-900"
+                          title="Delete Lead"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-gray-400">View Only</span>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -1392,59 +1542,11 @@ const GenerateLeadsView = ({ showNotification }) => {
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <div className="text-sm text-gray-900">
-                              {(() => {
-                                // Debug: Log the raw scheduled_time value
-                                console.log('Raw scheduled_time:', email.scheduled_time);
-                                console.log('Type:', typeof email.scheduled_time);
-                                
-                                // Handle datetime object from backend
-                                let timeStr = email.scheduled_time;
-                                if (typeof timeStr === 'object' && timeStr !== null) {
-                                  // Convert datetime object to string
-                                  timeStr = timeStr.toString();
-                                }
-                                
-                                // Parse the scheduled_time string directly to avoid timezone conversion
-                                if (timeStr.includes('T')) {
-                                  // Format: 2025-10-24T15:50:00
-                                  const [datePart, timePart] = timeStr.split('T');
-                                  const [year, month, day] = datePart.split('-');
-                                  const [hours, minutes, seconds] = timePart.split(':');
-                                  console.log('Parsed time:', `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`);
-                                  return `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`;
-                                } else if (timeStr.includes(' ')) {
-                                  // Format: 2025-10-24 15:50:00
-                                  const [datePart, timePart] = timeStr.split(' ');
-                                  const [year, month, day] = datePart.split('-');
-                                  const [hours, minutes, seconds] = timePart.split(':');
-                                  console.log('Parsed time:', `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`);
-                                  return `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`;
-                                } else {
-                                  // Fallback to original method
-                                  const date = new Date(email.scheduled_time);
-                                  const year = date.getFullYear();
-                                  const month = String(date.getMonth() + 1).padStart(2, '0');
-                                  const day = String(date.getDate()).padStart(2, '0');
-                                  const hours = String(date.getHours()).padStart(2, '0');
-                                  const minutes = String(date.getMinutes()).padStart(2, '0');
-                                  const seconds = String(date.getSeconds()).padStart(2, '0');
-                                  console.log('Date object time:', `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`);
-                                  return `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`;
-                                }
-                              })()}
+                              {formatDateTime(email.scheduled_time)}
                             </div>
                             {email.sent_at && (
                               <div className="text-xs text-gray-500">
-                                Sent: {(() => {
-                                  const date = new Date(email.sent_at);
-                                  const year = date.getFullYear();
-                                  const month = String(date.getMonth() + 1).padStart(2, '0');
-                                  const day = String(date.getDate()).padStart(2, '0');
-                                  const hours = String(date.getHours()).padStart(2, '0');
-                                  const minutes = String(date.getMinutes()).padStart(2, '0');
-                                  const seconds = String(date.getSeconds()).padStart(2, '0');
-                                  return `${month}/${day}/${year}, ${hours}:${minutes}:${seconds}`;
-                                })()}
+                                Sent: {formatDateTime(email.sent_at)}
                               </div>
                             )}
                           </td>
@@ -1745,7 +1847,7 @@ const GenerateLeadsView = ({ showNotification }) => {
       {/* Bulk Schedule Email Modal */}
       {showBulkScheduleModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+          <div className="bg-white rounded-lg p-6 pb-8 w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-gray-900">Schedule Bulk Emails</h2>
               <button
@@ -1816,33 +1918,87 @@ const GenerateLeadsView = ({ showNotification }) => {
                 </p>
               </div>
               
-              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                <h4 className="font-medium text-gray-900 mb-2">Email Template Preview</h4>
-                <p className="text-sm text-gray-600 mb-1">
-                  <strong>Template:</strong> Dynamic templates based on each company's email type and industry
-                </p>
-                <p className="text-sm text-gray-600 mb-1">
-                  <strong>Email Types:</strong> Intro, First Follow-Up, Second Follow-Up, Third Follow-Up, Final Follow-Up
-                </p>
-                <p className="text-xs text-gray-500">
-                  Each email will be personalized with company name, contact person, and industry-specific content
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Email Type *
+                </label>
+                <select
+                  required
+                  value={bulkScheduleForm.email_type || 'intro'}
+                  onChange={(e) => setBulkScheduleForm({...bulkScheduleForm, email_type: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                >
+                  <option value="intro">Intro Email</option>
+                  <option value="first_followup">First Follow-Up</option>
+                  <option value="second_followup">Second Follow-Up</option>
+                  <option value="third_followup">Third Follow-Up</option>
+                  <option value="final_followup">Final Follow-Up</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Select which type of email to send to all selected companies
                 </p>
               </div>
               
-              <div className="flex justify-end space-x-3 pt-4">
+              {/* Document Upload - Only for Intro Email */}
+              {bulkScheduleForm.email_type === 'intro' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Attach Document (Optional)
+                  </label>
+                  <input
+                    type="file"
+                    accept="*/*"
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      setBulkScheduleForm({...bulkScheduleForm, attachment: file});
+                    }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Attach any document to include with the intro email (PDF, DOC, XLS, PPT, images, etc.)
+                  </p>
+                </div>
+              )}
+              
+              <div className="p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <h4 className="font-medium text-gray-900 mb-3">Email Template Preview</h4>
+                <div className="space-y-2">
+                  <p className="text-sm text-gray-600 leading-relaxed">
+                    <strong className="font-semibold">Template:</strong> {bulkScheduleForm.email_type === 'intro' ? 'Strengthening your digital presence across the Middle East' :
+                                            bulkScheduleForm.email_type === 'first_followup' ? 'Following up on your digital marketing initiatives' :
+                                            bulkScheduleForm.email_type === 'second_followup' ? 'Achieving measurable ROI through digital marketing' :
+                                            bulkScheduleForm.email_type === 'third_followup' ? 'Your reliable partner for digital growth in the Middle East' :
+                                            bulkScheduleForm.email_type === 'final_followup' ? 'Staying connected for future digital initiatives' :
+                                            'Dynamic templates based on each company\'s email type and industry'}
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    <strong className="font-semibold">Email Type:</strong> {bulkScheduleForm.email_type === 'intro' ? 'Intro Email' :
+                                            bulkScheduleForm.email_type === 'first_followup' ? 'First Follow-Up' :
+                                            bulkScheduleForm.email_type === 'second_followup' ? 'Second Follow-Up' :
+                                            bulkScheduleForm.email_type === 'third_followup' ? 'Third Follow-Up' :
+                                            bulkScheduleForm.email_type === 'final_followup' ? 'Final Follow-Up' :
+                                            bulkScheduleForm.email_type}
+                  </p>
+                  <p className="text-xs text-gray-500 pt-2">
+                    Each email will be personalized with company name, contact person, and industry-specific content
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex justify-end space-x-3 pt-6 pb-2 sticky bottom-0 bg-white">
                 <button
                   type="button"
                   onClick={() => setShowBulkScheduleModal(false)}
-                  className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+                  className="px-6 py-2.5 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors font-medium"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2"
+                  className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2 whitespace-nowrap font-medium"
                 >
                   <Send size={16} />
-                  Schedule {selectedCompanies.length} Emails in Batches
+                  <span>Schedule {selectedCompanies.length} Email{selectedCompanies.length !== 1 ? 's' : ''}</span>
                 </button>
               </div>
             </form>
@@ -1951,6 +2107,99 @@ const GenerateLeadsView = ({ showNotification }) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Progress Updates Modal */}
+      {showProgressUpdates && selectedLeadForUpdates && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden">
+            <div className="p-6 border-b flex justify-between items-center">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Progress Updates</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  {selectedLeadForUpdates.company_name} - {selectedLeadForUpdates.project_name}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowProgressUpdates(false);
+                  setProgressUpdates([]);
+                  setSelectedLeadForUpdates(null);
+                }}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {progressUpdates.length === 0 ? (
+                <div className="text-center py-8">
+                  <FileText className="mx-auto h-12 w-12 text-gray-400" />
+                  <p className="text-gray-500 mt-2">No progress updates yet</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Log Header */}
+                  <div className="bg-gray-100 p-3 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-gray-600" />
+                      <span className="text-sm font-semibold text-gray-700">Complete Activity Log ({progressUpdates.length} entries)</span>
+                    </div>
+                  </div>
+                  
+                  {/* Timeline of Updates */}
+                  {progressUpdates.map((update, index) => (
+                    <div key={update.id || index} className="relative">
+                      {/* Timeline Connector */}
+                      {index < progressUpdates.length - 1 && (
+                        <div className="absolute left-7 top-12 bottom-0 w-0.5 bg-blue-300"></div>
+                      )}
+                      
+                      <div className="border-l-4 border-blue-500 bg-blue-50 p-4 rounded-lg shadow-sm">
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center justify-center w-6 h-6 bg-blue-600 rounded-full">
+                              <span className="text-xs font-bold text-white">{index + 1}</span>
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <User className="h-4 w-4 text-blue-600" />
+                                <span className="font-semibold text-gray-900">{update.employee_name}</span>
+                              </div>
+                            </div>
+                          </div>
+                          <span className="text-xs text-gray-500">
+                            {new Date(update.created_at).toLocaleString('en-IN', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              second: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                        <div className="mb-2">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 capitalize">
+                            {update.status}
+                          </span>
+                        </div>
+                        {update.progress_notes && (
+                          <div className="mt-2 p-2 bg-white rounded border border-blue-200">
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap">
+                              {update.progress_notes}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
