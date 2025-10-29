@@ -2,12 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { 
   Plus, Building, Search, Filter, X, Edit, Trash2, Eye,
   Calendar, DollarSign, FileText, MapPin, Mail, Phone, 
-  AlertCircle, CheckCircle, Clock, Award, Ban, FileIcon
+  AlertCircle, CheckCircle, Clock, Award, Ban, FileIcon, Download
 } from 'lucide-react';
-import { apiCall } from '../utils/api';
+import { apiCall, API_BASE } from '../utils/api';
 
 const TendersView = ({ showNotification }) => {
   const [tenders, setTenders] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -18,6 +19,8 @@ const TendersView = ({ showNotification }) => {
   const [selectedTender, setSelectedTender] = useState(null);
   const [tenderForm, setTenderForm] = useState({
     tender_number: '',
+    tender_name: '',
+    short_name: '',
     title: '',
     description: '',
     tender_type: 'government',
@@ -26,16 +29,21 @@ const TendersView = ({ showNotification }) => {
     budget_amount: '',
     currency: 'INR',
     published_date: '',
+    rfp_date: '',
     submission_deadline: '',
+    rfq_date: '',
     opening_date: '',
-    status: 'draft',
+    status: 'new',
+    query: '',
     contact_person: '',
     contact_email: '',
     contact_phone: '',
     location: '',
     eligibility_criteria: '',
     documents_required: '',
-    important_documents: []
+    important_documents: [],
+    project_coordinator_id: '',
+    project_team_ids: []
   });
 
   useEffect(() => {
@@ -48,14 +56,30 @@ const TendersView = ({ showNotification }) => {
       const url = typeFilter === 'all' 
         ? '/api/admin/tenders' 
         : `/api/admin/tenders?type=${typeFilter}`;
-      const data = await apiCall(url);
+      const [data, employeesData] = await Promise.all([
+        apiCall(url),
+        apiCall('/api/admin/employees')
+      ]);
       setTenders(data || []);
+      setEmployees(employeesData || []);
     } catch (error) {
       console.error('Error loading tenders:', error);
       showNotification('Failed to load tenders', 'error');
     } finally {
       setLoading(false);
     }
+  };
+
+  const getCodeFromEmployee = (emp) => {
+    return (
+      (emp && (emp.salary_code || emp.salaryCode || emp.employeeId || emp.employee_id)) || ''
+    ).toString().trim();
+  };
+
+  const resolveEmployeeByCode = (code) => {
+    const normalized = (code || '').toString().trim();
+    if (!normalized) return null;
+    return employees.find(emp => getCodeFromEmployee(emp) === normalized) || null;
   };
 
   const handleCreateTender = async () => {
@@ -98,6 +122,12 @@ const TendersView = ({ showNotification }) => {
     }
   };
 
+  const handleExport = () => {
+    // Navigate browser to API endpoint to allow proper file headers/cookies
+    const url = `${API_BASE}/api/admin/tenders/export`;
+    window.location.href = url;
+  };
+
   const handleDeleteTender = async (tenderId) => {
     if (!window.confirm('Are you sure you want to delete this tender?')) {
       return;
@@ -119,6 +149,8 @@ const TendersView = ({ showNotification }) => {
   const resetForm = () => {
     setTenderForm({
       tender_number: '',
+      tender_name: '',
+      short_name: '',
       title: '',
       description: '',
       tender_type: 'government',
@@ -127,16 +159,23 @@ const TendersView = ({ showNotification }) => {
       budget_amount: '',
       currency: 'INR',
       published_date: '',
+      rfp_date: '',
       submission_deadline: '',
+      rfq_date: '',
       opening_date: '',
-      status: 'draft',
+      status: 'new',
+      query: '',
       contact_person: '',
       contact_email: '',
       contact_phone: '',
       location: '',
       eligibility_criteria: '',
       documents_required: '',
-      important_documents: []
+      important_documents: [],
+      project_coordinator_id: '',
+      project_team_ids: [],
+      coordinator_salary_code: '',
+      team_salary_codes: ''
     });
   };
 
@@ -153,16 +192,21 @@ const TendersView = ({ showNotification }) => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'published':
-      case 'open':
-        return 'bg-green-100 text-green-800';
-      case 'draft':
-        return 'bg-gray-100 text-gray-800';
-      case 'closed':
+      case 'tender_submitted':
         return 'bg-blue-100 text-blue-800';
+      case 'working_on_it':
+        return 'bg-yellow-100 text-yellow-800';
       case 'awarded':
-        return 'bg-purple-100 text-purple-800';
-      case 'cancelled':
+        return 'bg-green-100 text-green-800';
+      case 'queries_submitted':
+      case 'appendix_ab_submitted':
+        return 'bg-cyan-100 text-cyan-800';
+      case 'need_extension_on_tender':
+        return 'bg-orange-100 text-orange-800';
+      case 'skipped':
+        return 'bg-gray-100 text-gray-800';
+      case 'lost':
+      case 'rejected_awarded_to_other_company':
         return 'bg-red-100 text-red-800';
       default:
         return 'bg-gray-100 text-gray-800';
@@ -171,18 +215,34 @@ const TendersView = ({ showNotification }) => {
 
   const getStatusIcon = (status) => {
     switch (status) {
-      case 'published':
-      case 'open':
+      case 'tender_submitted':
         return <CheckCircle size={16} />;
-      case 'closed':
+      case 'working_on_it':
         return <Clock size={16} />;
       case 'awarded':
         return <Award size={16} />;
-      case 'cancelled':
+      case 'queries_submitted':
+      case 'appendix_ab_submitted':
+        return <FileText size={16} />;
+      case 'need_extension_on_tender':
+        return <Clock size={16} />;
+      case 'skipped':
+        return <FileIcon size={16} />;
+      case 'lost':
+      case 'rejected_awarded_to_other_company':
         return <Ban size={16} />;
       default:
         return <FileIcon size={16} />;
     }
+  };
+
+  const formatStatus = (status) => {
+    if (!status) return '-';
+    return status
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+      .replace(/Ab/gi, 'A/B');
   };
 
   const getTypeColor = (type) => {
@@ -223,16 +283,25 @@ const TendersView = ({ showNotification }) => {
           <h1 className="text-2xl font-bold text-gray-900">Tenders</h1>
           <p className="text-gray-600">Manage government and private tenders</p>
         </div>
-        <button
-          onClick={() => {
-            resetForm();
-            setShowCreateModal(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-        >
-          <Plus size={20} />
-          Create New Tender
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
+          >
+            <Download size={20} />
+            Export Report
+          </button>
+          <button
+            onClick={() => {
+              resetForm();
+              setShowCreateModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+          >
+            <Plus size={20} />
+            Create New Tender
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -309,12 +378,15 @@ const TendersView = ({ showNotification }) => {
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
           >
             <option value="all">All Status</option>
-            <option value="draft">Draft</option>
-            <option value="published">Published</option>
-            <option value="open">Open</option>
-            <option value="closed">Closed</option>
+            <option value="tender_submitted">Tender Submitted</option>
+            <option value="skipped">Skipped</option>
+            <option value="lost">Lost</option>
             <option value="awarded">Awarded</option>
-            <option value="cancelled">Cancelled</option>
+            <option value="working_on_it">Working on it</option>
+            <option value="rejected_awarded_to_other_company">Rejected / Awarded to other company</option>
+            <option value="need_extension_on_tender">Need Extension on Tender</option>
+            <option value="queries_submitted">Queries Submitted</option>
+            <option value="appendix_ab_submitted">Appendix A/B Submitted</option>
           </select>
         </div>
       </div>
@@ -325,78 +397,37 @@ const TendersView = ({ showNotification }) => {
           <table className="w-full">
             <thead className="bg-gray-50">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tender</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">No.</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tender Name</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tender Number</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Budget</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Deadline</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days Left</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Date</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Today Update (Log)</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Updated By</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
-              {filteredTenders.map((tender) => (
+              {filteredTenders.map((tender, idx) => (
                 <tr key={tender.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">
-                        {tender.tender_number}
-                      </div>
-                      <div className="text-sm text-gray-500">
-                        {tender.title}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getTypeColor(tender.tender_type)}`}>
-                      {tender.tender_type === 'government' ? 'Government' : 'Private'}
-                    </span>
-                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{idx + 1}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{tender.category || '-'}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{tender.tender_name || tender.title}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">{tender.tender_number}</td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(tender.status)}`}>
                       {getStatusIcon(tender.status)}
-                      {tender.status}
+                      {formatStatus(tender.status)}
                     </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm text-gray-900">
-                    {formatCurrency(tender.budget_amount, tender.currency)}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-900">
                     {tender.submission_deadline ? new Date(tender.submission_deadline).toLocaleDateString() : 'N/A'}
                   </td>
-                  <td className="px-6 py-4">
-                    {tender.days_left !== undefined && (
-                      <span className={`text-sm font-medium ${
-                        tender.days_left < 0 ? 'text-red-600' : tender.days_left < 7 ? 'text-orange-600' : 'text-green-600'
-                      }`}>
-                        {tender.days_left < 0 ? 'Overdue' : tender.days_left + ' days'}
-                      </span>
-                    )}
+                  <td className="px-6 py-4 text-sm text-gray-900 whitespace-pre-wrap">
+                    {tender.today_update_message || '-'}
                   </td>
-                  <td className="px-6 py-4 text-sm font-medium">
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => openDetailModal(tender)}
-                        className="text-blue-600 hover:text-blue-900"
-                        title="View Details"
-                      >
-                        <Eye size={16} />
-                      </button>
-                      <button
-                        onClick={() => openEditModal(tender)}
-                        className="text-amber-600 hover:text-amber-900"
-                        title="Edit"
-                      >
-                        <Edit size={16} />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteTender(tender.id)}
-                        className="text-red-600 hover:text-red-900"
-                        title="Delete"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    {tender.today_update_by || '-'}
                   </td>
                 </tr>
               ))}
@@ -452,6 +483,24 @@ const TendersView = ({ showNotification }) => {
                       onChange={(e) => setTenderForm({...tenderForm, tender_number: e.target.value})}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                       placeholder="TND-2025-001"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Tender Name *</label>
+                    <input
+                      type="text"
+                      value={tenderForm.tender_name}
+                      onChange={(e) => setTenderForm({...tenderForm, tender_name: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Short Name</label>
+                    <input
+                      type="text"
+                      value={tenderForm.short_name}
+                      onChange={(e) => setTenderForm({...tenderForm, short_name: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                     />
                   </div>
                   
@@ -539,12 +588,15 @@ const TendersView = ({ showNotification }) => {
                       onChange={(e) => setTenderForm({...tenderForm, status: e.target.value})}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                     >
-                      <option value="draft">Draft</option>
-                      <option value="published">Published</option>
-                      <option value="open">Open</option>
-                      <option value="closed">Closed</option>
+                      <option value="tender_submitted">Tender Submitted</option>
+                      <option value="skipped">Skipped</option>
+                      <option value="lost">Lost</option>
                       <option value="awarded">Awarded</option>
-                      <option value="cancelled">Cancelled</option>
+                      <option value="working_on_it">Working on it</option>
+                      <option value="rejected_awarded_to_other_company">Rejected / Awarded to other company</option>
+                      <option value="need_extension_on_tender">Need Extension on Tender</option>
+                      <option value="queries_submitted">Queries Submitted</option>
+                      <option value="appendix_ab_submitted">Appendix A/B Submitted</option>
                     </select>
                   </div>
                 </div>
@@ -564,6 +616,16 @@ const TendersView = ({ showNotification }) => {
                   </div>
 
                   <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">RFP Date</label>
+                    <input
+                      type="date"
+                      value={tenderForm.rfp_date}
+                      onChange={(e) => setTenderForm({...tenderForm, rfp_date: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Submission Deadline *
                     </label>
@@ -571,6 +633,16 @@ const TendersView = ({ showNotification }) => {
                       type="date"
                       value={tenderForm.submission_deadline}
                       onChange={(e) => setTenderForm({...tenderForm, submission_deadline: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">RFQ Date</label>
+                    <input
+                      type="date"
+                      value={tenderForm.rfq_date}
+                      onChange={(e) => setTenderForm({...tenderForm, rfq_date: e.target.value})}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                     />
                   </div>
@@ -635,11 +707,77 @@ const TendersView = ({ showNotification }) => {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Query</label>
+                    <input
+                      type="text"
+                      value={tenderForm.query}
+                      onChange={(e) => setTenderForm({...tenderForm, query: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    />
+                  </div>
                 </div>
               </div>
 
               {/* Full Width Fields */}
               <div className="mt-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Project Coordinator *</label>
+                    <input
+                      type="text"
+                      value={tenderForm.coordinator_salary_code}
+                      onChange={(e) => {
+                        const code = String(e.target.value || '').trim();
+                        const emp = resolveEmployeeByCode(code);
+                        setTenderForm({
+                          ...tenderForm,
+                          coordinator_salary_code: code,
+                          project_coordinator_id: emp ? emp.id : ''
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                      placeholder="Salary Code"
+                    />
+                    {tenderForm.project_coordinator_id && (
+                      <p className="mt-1 text-xs text-green-700">Coordinator: {employees.find(emp => emp.id === tenderForm.project_coordinator_id)?.name}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Project Team (Salary Codes, comma separated)</label>
+                    <input
+                      type="text"
+                      value={tenderForm.team_salary_codes}
+                      onChange={(e) => {
+                        const raw = e.target.value || '';
+                        const codes = raw.split(',').map(v => String(v).trim()).filter(Boolean);
+                        const ids = codes
+                          .map(code => {
+                            const emp = resolveEmployeeByCode(code);
+                            return emp ? emp.id : null;
+                          })
+                          .filter(id => id !== null);
+                        setTenderForm({
+                          ...tenderForm,
+                          team_salary_codes: raw,
+                          project_team_ids: ids
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                      placeholder="e.g., SC001, SC002"
+                    />
+                    {Array.isArray(tenderForm.project_team_ids) && tenderForm.project_team_ids.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {tenderForm.project_team_ids.map(id => (
+                          <span key={id} className="px-2 py-1 text-xs bg-green-50 text-green-700 border border-green-200 rounded">
+                            {employees.find(emp => emp.id === id)?.name || id}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Description
@@ -737,7 +875,7 @@ const TendersView = ({ showNotification }) => {
                   <label className="text-sm font-medium text-gray-500">Status</label>
                   <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(selectedTender.status)}`}>
                     {getStatusIcon(selectedTender.status)}
-                    {selectedTender.status}
+                    {formatStatus(selectedTender.status)}
                   </span>
                 </div>
                 <div>

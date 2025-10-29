@@ -31,9 +31,16 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   const [tasks, setTasks] = useState([]);
   const [projects, setProjects] = useState([]);
   const [tickets, setTickets] = useState([]);
+  const [assignedTenders, setAssignedTenders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [showTenderUpdateModal, setShowTenderUpdateModal] = useState(false);
+  const [selectedTender, setSelectedTender] = useState(null);
+  const [tenderUpdateForm, setTenderUpdateForm] = useState({
+    update_message: '',
+    status: ''
+  });
   const [showCreateTicketModal, setShowCreateTicketModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [selectedItem, setSelectedItem] = useState(null);
@@ -235,7 +242,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       setLoading(true);
       console.log('🔄 Loading employee data for ID:', user.id);
       
-      const [notificationsData, announcementsData, allTasks, allProjects, allTickets] = await Promise.all([
+      const [notificationsData, announcementsData, allTasks, allProjects, allTickets, myTenders] = await Promise.all([
         apiCall(`/api/employee/notifications?employee_id=${user.id}`).catch(err => {
           console.log('⚠️ Employee notifications API not available, using empty array');
           return { success: true, notifications: [] };
@@ -246,7 +253,8 @@ const EmployeeDashboard = ({ user, onLogout }) => {
         }),
         apiCall(`/api/admin/tasks`),
         apiCall(`/api/admin/projects`),
-        apiCall(`/api/admin/tickets`)
+        apiCall(`/api/admin/tickets`),
+        apiCall(`/api/employee/assigned-tenders?employee_id=${user.id}`).catch(()=>({success:true,tenders:[]}))
       ]);
       
       // Filter data after getting all results
@@ -267,6 +275,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       setTasks(tasksData);
       setProjects(projectsData);
       setTickets(ticketsData);
+      setAssignedTenders((myTenders && myTenders.tenders) || []);
       
       // Calculate statistics
       const calculatedStats = {
@@ -506,7 +515,10 @@ const EmployeeDashboard = ({ user, onLogout }) => {
         `/api/employee/projects/${selectedItem.id}/update` :
         `/api/employee/tickets/${selectedItem.id}/update`;
       
-      await apiCall(endpoint, {
+      console.log(`🔄 Updating ${selectedItem.type} via endpoint: ${endpoint}`);
+      console.log(`📝 Status: ${updateForm.status}, Comments: ${updateForm.comments}`);
+      
+      const response = await apiCall(endpoint, {
         method: 'PUT',
         body: JSON.stringify({
           employee_id: user.id,
@@ -515,19 +527,107 @@ const EmployeeDashboard = ({ user, onLogout }) => {
         })
       });
       
+      console.log(`✅ Update response:`, response);
+      
       setShowUpdateModal(false);
       setSelectedItem(null);
       setUpdateForm({ status: '', comments: '' });
+      showNotification(`${selectedItem.type} updated successfully!`, 'success');
+      // Proactively notify other views to refresh even if server broadcast is missed
+      try {
+        const table = selectedItem.type === 'task' ? 'tasks' : (selectedItem.type === 'project' ? 'projects' : 'tickets');
+        window.dispatchEvent(new CustomEvent('databaseChange', { detail: { table, action: 'update' } }));
+      } catch (_) {}
       loadData(); // Reload data to reflect changes
     } catch (error) {
       console.error('Error updating item:', error);
+      showNotification(`Failed to update ${selectedItem.type}`, 'error');
     }
+  };
+
+  const handleTenderUpdate = async () => {
+    if (!selectedTender) return;
+    
+    try {
+      const response = await apiCall(`/api/employee/tenders/${selectedTender.id}/update`, {
+        method: 'POST',
+        body: JSON.stringify({
+          employee_id: user.id,
+          update_message: tenderUpdateForm.update_message,
+          status: tenderUpdateForm.status || selectedTender.status
+        })
+      });
+      
+      if (response.success) {
+        showNotification('Tender update submitted successfully!', 'success');
+        setShowTenderUpdateModal(false);
+        setSelectedTender(null);
+        setTenderUpdateForm({ update_message: '', status: '' });
+        loadData(); // Reload tenders
+        // Notify admin view to refresh
+        window.dispatchEvent(new CustomEvent('databaseChange', { 
+          detail: { table: 'tenders', action: 'update' } 
+        }));
+      } else {
+        showNotification(response.message || 'Failed to submit update', 'error');
+      }
+    } catch (error) {
+      console.error('Error updating tender:', error);
+      showNotification('Failed to submit tender update', 'error');
+    }
+  };
+
+  const openTenderUpdateModal = (tender) => {
+    setSelectedTender(tender);
+    setTenderUpdateForm({
+      update_message: '',
+      status: tender.status || ''
+    });
+    setShowTenderUpdateModal(true);
   };
 
   const openUpdateModal = (item) => {
     setSelectedItem(item);
+    // Normalize status value for select options
+    const normalizeStatusForSelect = (type, status) => {
+      if (!status) return '';
+      if (type === 'ticket') {
+        const map = {
+          'Open': 'open',
+          'open': 'open',
+          'In Progress': 'in_progress',
+          'in_progress': 'in_progress',
+          'Resolved': 'resolved',
+          'resolved': 'resolved',
+          'Closed': 'closed',
+          'closed': 'closed'
+        };
+        return map[status] || status;
+      }
+      if (type === 'task') {
+        const map = {
+          'Pending': 'pending', 'pending': 'pending',
+          'In Progress': 'in_progress', 'in_progress': 'in_progress',
+          'Completed': 'completed', 'completed': 'completed',
+          'Cancelled': 'cancelled', 'cancelled': 'cancelled'
+        };
+        return map[status] || status;
+      }
+      if (type === 'project') {
+        const map = {
+          'Planning': 'planning', 'planning': 'planning',
+          'In Progress': 'in_progress', 'in_progress': 'in_progress',
+          'On Hold': 'on_hold', 'on_hold': 'on_hold',
+          'Completed': 'completed', 'completed': 'completed',
+          'Cancelled': 'cancelled', 'cancelled': 'cancelled'
+        };
+        return map[status] || status;
+      }
+      return status;
+    };
+
     setUpdateForm({
-      status: item.status,
+      status: normalizeStatusForSelect(item.type, item.status),
       comments: ''
     });
     setShowUpdateModal(true);
@@ -669,13 +769,15 @@ const EmployeeDashboard = ({ user, onLogout }) => {
   const getStatusColor = (status) => {
     switch (status) {
       case 'completed': return 'bg-green-100 text-green-800';
-      case 'resolved': return 'bg-green-100 text-green-800';
-      case 'in_progress': return 'bg-blue-100 text-blue-800';
-      case 'pending': return 'bg-yellow-100 text-yellow-800';
-      case 'open': return 'bg-yellow-100 text-yellow-800';
-      case 'planning': return 'bg-purple-100 text-purple-800';
-      case 'cancelled': return 'bg-red-100 text-red-800';
-      case 'closed': return 'bg-gray-100 text-gray-800';
+      case 'resolved': case 'Resolved': return 'bg-green-100 text-green-800';
+      case 'in_progress': case 'In Progress': return 'bg-blue-100 text-blue-800';
+      case 'pending': case 'Pending': return 'bg-yellow-100 text-yellow-800';
+      case 'open': case 'Open': return 'bg-yellow-100 text-yellow-800';
+      case 'planning': case 'Planning': return 'bg-purple-100 text-purple-800';
+      case 'cancelled': case 'Cancelled': return 'bg-red-100 text-red-800';
+      case 'closed': case 'Closed': return 'bg-gray-100 text-gray-800';
+      case 'on_hold': case 'On Hold': return 'bg-orange-100 text-orange-800';
+      case 'completed': case 'Completed': return 'bg-green-100 text-green-800';
       default: return 'bg-gray-100 text-gray-800';
     }
   };
@@ -994,6 +1096,8 @@ const EmployeeDashboard = ({ user, onLogout }) => {
               </div>
       )}
 
+      {/* Assigned Tenders moved below header with other content sections */}
+
       {/* Sidebar */}
       <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white shadow-lg flex flex-col transform transition-transform duration-300 ease-in-out ${
         sidebarOpen ? 'translate-x-0' : '-translate-x-full'
@@ -1028,7 +1132,8 @@ const EmployeeDashboard = ({ user, onLogout }) => {
               { id: 'attendance', label: 'Attendance', icon: Clock },
               { id: 'tasks', label: 'Tasks', icon: CheckSquare },
               { id: 'projects', label: 'Projects', icon: Briefcase },
-              { id: 'tickets', label: 'Tickets', icon: Ticket }
+              { id: 'tickets', label: 'Tickets', icon: Ticket },
+              { id: 'assigned-tenders', label: 'Assigned Tenders', icon: FileText }
             ].map(tab => (
               <button
                 key={tab.id}
@@ -1209,7 +1314,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
       <div className="flex-1 flex flex-col lg:ml-64">
         {/* Header */}
         <header className="bg-white shadow-sm border-b">
-          <div className="px-6 py-4">
+          <div className="w-full max-w-7xl mx-auto px-6 py-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
                 {/* Mobile Menu Button */}
@@ -1228,6 +1333,7 @@ const EmployeeDashboard = ({ user, onLogout }) => {
                     {activeTab === 'tasks' && 'My Tasks'}
                     {activeTab === 'projects' && 'My Projects'}
                     {activeTab === 'tickets' && 'My Tickets'}
+                    {activeTab === 'assigned-tenders' && 'Assigned Tenders'}
                     {activeTab === 'leadgeneration' && (
                       leadGenSubTab === 'leads' ? 'Leads' :
                       leadGenSubTab === 'assigned' ? 'Assigned Leads' :
@@ -1826,6 +1932,60 @@ const EmployeeDashboard = ({ user, onLogout }) => {
             </div>
           </div>
         )}
+
+      {activeTab === 'assigned-tenders' && (
+        <div className="bg-white rounded-xl shadow-sm border">
+          <div className="p-6 border-b flex justify-between items-center">
+            <h3 className="text-lg font-semibold">Assigned Tenders</h3>
+          </div>
+          <div className="p-6 overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tender</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Deadline</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {assignedTenders.map(t => (
+                  <tr key={t.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <div className="font-medium">{t.tender_number} - {t.title}</div>
+                      <div className="text-sm text-gray-500">{t.organization_name}</div>
+                    </td>
+                    <td className="px-6 py-4 text-sm">{t.tender_type}</td>
+                    <td className="px-6 py-4 text-sm">{t.status}</td>
+                    <td className="px-6 py-4 text-sm">{t.submission_deadline ? new Date(t.submission_deadline).toLocaleDateString() : '-'}</td>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => openTenderUpdateModal(t)}
+                        className="flex items-center gap-2 px-3 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+                      >
+                        <Edit size={16} />
+                        Update/Comment
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {assignedTenders.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>
+                      <div className="py-16 flex flex-col items-center justify-center text-center">
+                        <FileText className="h-12 w-12 text-gray-300 mb-4" />
+                        <p className="text-gray-600 text-lg">No assigned tenders</p>
+                        <p className="text-gray-400 text-sm">You'll see tenders here when they're assigned to you</p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
           {/* Attendance Tab - For HR Access: Show both personal clock-in/out and all employees attendance */}
         {activeTab === 'attendance' && employeeAccess.hr_access && (
@@ -2851,6 +3011,88 @@ const EmployeeDashboard = ({ user, onLogout }) => {
             </div>
           </div>
         )}
+
+      {/* Tender Update Modal */}
+      {showTenderUpdateModal && selectedTender && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full">
+            <div className="p-6 border-b">
+              <div className="flex justify-between items-center">
+                <h3 className="text-lg font-semibold">Update Tender</h3>
+                <button
+                  onClick={() => {
+                    setShowTenderUpdateModal(false);
+                    setSelectedTender(null);
+                    setTenderUpdateForm({ update_message: '', status: '' });
+                  }}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-sm text-gray-600 mt-2">
+                {selectedTender.tender_number} - {selectedTender.title}
+              </p>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Status (Optional)</label>
+                <select
+                  value={tenderUpdateForm.status}
+                  onChange={(e) => setTenderUpdateForm({...tenderUpdateForm, status: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                >
+                  <option value="">Keep current status</option>
+                  <option value="tender_submitted">Tender Submitted</option>
+                  <option value="skipped">Skipped</option>
+                  <option value="lost">Lost</option>
+                  <option value="awarded">Awarded</option>
+                  <option value="working_on_it">Working on it</option>
+                  <option value="rejected_awarded_to_other_company">Rejected / Awarded to other company</option>
+                  <option value="need_extension_on_tender">Need Extension on Tender</option>
+                  <option value="queries_submitted">Queries Submitted</option>
+                  <option value="appendix_ab_submitted">Appendix A/B Submitted</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Update/Comment <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  value={tenderUpdateForm.update_message}
+                  onChange={(e) => setTenderUpdateForm({...tenderUpdateForm, update_message: e.target.value})}
+                  rows={5}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                  placeholder="Enter your update, progress notes, or comments about this tender..."
+                  required
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  This update will be visible in the "Today Update (Log)" column for admins.
+                </p>
+              </div>
+            </div>
+            <div className="p-6 border-t flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowTenderUpdateModal(false);
+                  setSelectedTender(null);
+                  setTenderUpdateForm({ update_message: '', status: '' });
+                }}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTenderUpdate}
+                disabled={!tenderUpdateForm.update_message.trim()}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                Submit Update
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Settings Modal */}
       {showSettings && (

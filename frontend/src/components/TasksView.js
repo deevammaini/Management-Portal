@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   CheckSquare, Plus, Edit, Trash2, Calendar, User, AlertCircle, 
-  Clock, Filter, Search, X, Save, ArrowUp, ArrowDown, ArrowRight
+  Clock, Filter, Search, X, Save, ArrowUp, ArrowDown, ArrowRight, Eye
 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 
@@ -16,8 +16,9 @@ const TasksView = ({ showNotification }) => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [assignedToFilter, setAssignedToFilter] = useState('all');
-  const [taskUpdates, setTaskUpdates] = useState([]);
-  const [showUpdates, setShowUpdates] = useState(false);
+  const [updatesModalOpen, setUpdatesModalOpen] = useState(false);
+  const [updatesForTask, setUpdatesForTask] = useState([]);
+  const [updatesTask, setUpdatesTask] = useState(null);
 
   const [taskForm, setTaskForm] = useState({
     title: '',
@@ -88,11 +89,10 @@ const TasksView = ({ showNotification }) => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [tasksData, employeesData, vendorsData, updatesData] = await Promise.all([
+      const [tasksData, employeesData, vendorsData] = await Promise.all([
         apiCall('/api/admin/tasks'),
         apiCall('/api/admin/employees'),
-        apiCall('/api/admin/vendors'),
-        apiCall('/api/admin/task-updates')
+        apiCall('/api/admin/vendors')
       ]);
       
       console.log('📊 TasksView loaded tasks:', tasksData);
@@ -101,12 +101,23 @@ const TasksView = ({ showNotification }) => {
       setTasks(tasksData);
       setEmployees(employeesData);
       setVendors(vendorsData);
-      setTaskUpdates(updatesData || []);
     } catch (error) {
       console.error('Error loading data:', error);
       showNotification('Failed to load data', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openUpdatesModal = async (task) => {
+    try {
+      setUpdatesTask(task);
+      setUpdatesModalOpen(true);
+      const res = await apiCall(`/api/admin/task-updates?task_id=${task.id}`);
+      setUpdatesForTask(res.updates || []);
+    } catch (e) {
+      console.error('Failed to load task updates:', e);
+      setUpdatesForTask([]);
     }
   };
 
@@ -237,13 +248,6 @@ const TasksView = ({ showNotification }) => {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowUpdates(!showUpdates)}
-            className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-          >
-            <Clock size={18} />
-            Updates ({taskUpdates.length})
-          </button>
-          <button
             onClick={() => setShowAddTask(true)}
             className="flex items-center gap-2 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
           >
@@ -253,50 +257,7 @@ const TasksView = ({ showNotification }) => {
         </div>
       </div>
 
-      {/* Updates Section */}
-      {showUpdates && (
-        <div className="bg-white rounded-xl shadow-sm border">
-          <div className="p-6 border-b">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Task Updates</h3>
-              <Clock className="h-5 w-5 text-gray-400" />
-            </div>
-          </div>
-          <div className="p-6">
-            {taskUpdates.length === 0 ? (
-              <div className="text-center py-12">
-                <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-500 text-lg">No updates yet</p>
-                <p className="text-gray-400 text-sm">Employee updates will appear here</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {taskUpdates.map((update) => (
-                  <div key={update.id} className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border-l-4 border-green-400">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h4 className="text-lg font-semibold text-gray-900">{update.task_title}</h4>
-                          <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">
-                            Update
-                          </span>
-                        </div>
-                        <p className="text-gray-700 mb-3">{update.update_message}</p>
-                        <div className="flex items-center gap-4 text-sm text-gray-500">
-                          <span><strong>Employee:</strong> {update.employee_name}</span>
-                          <span><strong>Progress:</strong> {update.progress_percentage}%</span>
-                          <span><strong>Status:</strong> {update.status || 'No status change'}</span>
-                          <span><strong>Updated:</strong> {new Date(update.created_at).toLocaleString()}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Removed global updates section */}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -453,6 +414,13 @@ const TasksView = ({ showNotification }) => {
                         <Edit size={16} />
                       </button>
                       <button
+                        onClick={() => openUpdatesModal(task)}
+                        className="text-gray-600 hover:text-gray-900"
+                        title="View Updates"
+                      >
+                        <Eye size={16} />
+                      </button>
+                      <button
                         onClick={() => handleDeleteTask(task.id)}
                         className="text-red-600 hover:text-red-900"
                       >
@@ -604,6 +572,47 @@ const TasksView = ({ showNotification }) => {
                   Create Task
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Updates Modal */}
+      {updatesModalOpen && updatesTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b flex-shrink-0">
+              <div className="flex justify-between items-center">
+                <h3 className="text-xl font-bold">Updates - {updatesTask.title}</h3>
+                <button onClick={() => { setUpdatesModalOpen(false); setUpdatesForTask([]); setUpdatesTask(null); }} className="text-gray-400 hover:text-gray-600">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1 modal-scrollbar">
+              {updatesForTask.length === 0 ? (
+                <div className="text-center py-12">
+                  <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No updates yet</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {updatesForTask.map((u) => (
+                    <div key={u.id} className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg border-l-4 border-green-400">
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="text-sm font-medium text-gray-900">{u.employee_name || 'Employee'}</span>
+                            <span className="px-2 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">{u.status || 'Update'}</span>
+                          </div>
+                          <p className="text-gray-700">{u.update_message || '-'}</p>
+                          <div className="text-xs text-gray-500 mt-2">{new Date(u.created_at).toLocaleString()}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>

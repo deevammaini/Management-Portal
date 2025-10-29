@@ -239,9 +239,19 @@ def execute_query(query, params=None, fetch_one=False, fetch_all=False):
             connection.commit()
             return results if results else []
     except Error as e:
-        # print(f"MySQL query error: {e}")
-        # print(f"Query: {query}")
-        # print(f"Params: {params}")
+        print(f"❌ MySQL query error: {e}")
+        print(f"Query: {query}")
+        print(f"Params: {params}")
+        if connection:
+            connection.rollback()
+        if fetch_all:
+            return []
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error in execute_query: {e}")
+        print(f"Query: {query}")
+        if connection:
+            connection.rollback()
         if fetch_all:
             return []
         return None
@@ -4766,6 +4776,35 @@ def get_tasks_frontend():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
+@app.route('/api/employee/assigned-tenders', methods=['GET'])
+def get_employee_assigned_tenders():
+    """Return tenders assigned to an employee (coordinator or in team)."""
+    try:
+        employee_id = request.args.get('employee_id', type=int)
+        if not employee_id:
+            return jsonify({'success': False, 'error': 'Employee ID required'}), 400
+
+        query = """
+            SELECT t.*
+            FROM created_tenders t
+            WHERE t.project_coordinator_id = %s
+               OR (t.project_team_ids IS NOT NULL AND JSON_CONTAINS(t.project_team_ids, JSON_ARRAY(%s)))
+        """
+        try:
+            tenders = execute_query(query, (employee_id, employee_id), fetch_all=True) or []
+        except Exception:
+            like_value = f"%{employee_id}%"
+            tenders = execute_query(
+                "SELECT * FROM created_tenders WHERE project_coordinator_id = %s OR project_team_ids LIKE %s",
+                (employee_id, like_value),
+                fetch_all=True
+            ) or []
+
+        return jsonify({'success': True, 'tenders': tenders})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/projects', methods=['GET'])
 def get_projects_frontend():
     """Get all projects for frontend"""
@@ -4828,11 +4867,89 @@ def get_task_updates():
 
 @app.route('/api/admin/ticket-updates', methods=['GET'])
 def get_ticket_updates():
-    """Get all ticket updates"""
+    """Get ticket updates.
+    If 'ticket_id' query param is provided, returns updates for that ticket.
+    Otherwise returns empty (UI does not need the full list).
+    """
     try:
-        return jsonify([])
-    except Exception as e:
+        ticket_id = request.args.get('ticket_id', type=int)
+        if not ticket_id:
+            return jsonify([])
+
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS ticket_updates (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                ticket_id INT NOT NULL,
+                employee_id INT NULL,
+                status VARCHAR(50) NULL,
+                update_message TEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+                FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        query = """
+            SELECT tu.id, tu.status, tu.update_message, tu.created_at,
+                   u.name AS employee_name
+            FROM ticket_updates tu
+            LEFT JOIN users u ON tu.employee_id = u.id
+            WHERE tu.ticket_id = %s
+            ORDER BY tu.created_at DESC, tu.id DESC
+        """
+        raw_updates = execute_query(query, (ticket_id,), fetch_all=True) or []
+
+        # Normalize timestamps to ISO with UTC marker so browsers convert to local correctly
+        updates = []
+        for u in raw_updates:
+            created_at = u.get('created_at')
+            if created_at is not None:
+                try:
+                    # If naive datetime, treat as UTC and append 'Z'
+                    iso_value = created_at.isoformat()
+                    if 'Z' not in iso_value and '+' not in iso_value:
+                        iso_value = iso_value + 'Z'
+                    u['created_at'] = iso_value
+                except Exception:
+                    # Fallback to string
+                    u['created_at'] = str(created_at)
+            updates.append(u)
+
+        return jsonify({'success': True, 'updates': updates})
+    except Exception:
         return jsonify({'error': 'Failed to get ticket updates'}), 500
+
+@app.route('/api/admin/tickets/<int:ticket_id>/updates', methods=['GET'])
+def get_ticket_updates_for_ticket(ticket_id):
+    """Get updates log for a specific ticket"""
+    try:
+        # Ensure table exists, then fetch updates
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS ticket_updates (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                ticket_id INT NOT NULL,
+                employee_id INT NULL,
+                status VARCHAR(50) NULL,
+                update_message TEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+                FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        query = """
+            SELECT tu.id, tu.status, tu.update_message, tu.created_at,
+                   u.name AS employee_name
+            FROM ticket_updates tu
+            LEFT JOIN users u ON tu.employee_id = u.id
+            WHERE tu.ticket_id = %s
+            ORDER BY tu.created_at DESC, tu.id DESC
+        """
+        updates = execute_query(query, (ticket_id,), fetch_all=True) or []
+        return jsonify({'success': True, 'updates': updates})
+    except Exception as e:
+        print(f"Error fetching ticket updates for ticket {ticket_id}: {e}")
+        return jsonify({'success': False, 'error': 'Failed to get updates'}), 500
 
 # Employee-specific API endpoints
 @app.route('/api/employee/notifications', methods=['GET'])
@@ -5054,6 +5171,17 @@ def update_employee_project(project_id):
         status = data.get('status')
         comments = data.get('comments', '')
         
+        # Map status to database format
+        status_map = {
+            'planning': 'planning',
+            'in_progress': 'in_progress',
+            'on_hold': 'on_hold',
+            'completed': 'completed',
+            'cancelled': 'cancelled'
+        }
+        
+        db_status = status_map.get(status, status)  # Use original if not in map
+        
         # Update project status and comments
         update_query = """
         UPDATE projects 
@@ -5061,12 +5189,12 @@ def update_employee_project(project_id):
         WHERE id = %s
         """
         
-        execute_query(update_query, (status, project_id))
+        execute_query(update_query, (db_status, project_id))
         
         # Broadcast the change
         broadcast_database_change('projects', 'update', {
             'id': project_id,
-            'status': status,
+            'status': db_status,
             'comments': comments
         })
         
@@ -5087,6 +5215,33 @@ def update_employee_task(task_id):
         status = data.get('status')
         comments = data.get('comments', '')
         
+        # Map status to database format
+        status_map = {
+            'pending': 'pending',
+            'in_progress': 'in_progress',
+            'completed': 'completed',
+            'cancelled': 'cancelled'
+        }
+        
+        db_status = status_map.get(status, status)  # Use original if not in map
+        
+        # Ensure task_updates table exists
+        try:
+            execute_query("""
+                CREATE TABLE IF NOT EXISTS task_updates (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    task_id INT NOT NULL,
+                    employee_id INT NULL,
+                    status VARCHAR(50) NULL,
+                    update_message TEXT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+                    FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE SET NULL
+                )
+            """)
+        except Exception:
+            pass
+
         # Update task status and comments
         update_query = """
         UPDATE tasks 
@@ -5094,12 +5249,23 @@ def update_employee_task(task_id):
         WHERE id = %s
         """
         
-        execute_query(update_query, (status, task_id))
+        execute_query(update_query, (db_status, task_id))
         
+        # Insert progress log
+        try:
+            employee_id = (request.get_json() or {}).get('employee_id')
+            insert_update = """
+                INSERT INTO task_updates (task_id, employee_id, status, update_message)
+                VALUES (%s, %s, %s, %s)
+            """
+            execute_query(insert_update, (task_id, employee_id, db_status, comments))
+        except Exception:
+            pass
+
         # Broadcast the change
         broadcast_database_change('tasks', 'update', {
             'id': task_id,
-            'status': status,
+            'status': db_status,
             'comments': comments
         })
         
@@ -5120,6 +5286,37 @@ def update_employee_ticket(ticket_id):
         status = data.get('status')
         comments = data.get('comments', '')
         
+        print(f"📝 Updating ticket {ticket_id} with status: {status}, comments: {comments}")
+        
+        # Map status to database format (same as admin endpoint)
+        status_map = {
+            'open': 'Open',
+            'in_progress': 'In Progress', 
+            'resolved': 'Resolved',
+            'closed': 'Closed'
+        }
+        
+        db_status = status_map.get(status, status)  # Use original if not in map
+        print(f"📝 Mapped status '{status}' to '{db_status}'")
+        
+        # Ensure ticket_updates table exists for logging
+        try:
+            execute_query("""
+                CREATE TABLE IF NOT EXISTS ticket_updates (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    ticket_id INT NOT NULL,
+                    employee_id INT NULL,
+                    status VARCHAR(50) NULL,
+                    update_message TEXT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+                    FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE SET NULL
+                )
+            """)
+        except Exception as _tbl_err:
+            # If table creation fails, proceed without blocking the status update
+            pass
+
         # Update ticket status and comments
         update_query = """
         UPDATE tickets 
@@ -5127,12 +5324,25 @@ def update_employee_ticket(ticket_id):
         WHERE id = %s
         """
         
-        execute_query(update_query, (status, ticket_id))
+        execute_query(update_query, (db_status, ticket_id))
+        
+        # Insert progress log
+        try:
+            employee_id = (request.get_json() or {}).get('employee_id')
+            insert_update = """
+                INSERT INTO ticket_updates (ticket_id, employee_id, status, update_message)
+                VALUES (%s, %s, %s, %s)
+            """
+            execute_query(insert_update, (ticket_id, employee_id, db_status, comments))
+        except Exception as _ins_err:
+            # Non-fatal
+            pass
+        print(f"✅ Ticket {ticket_id} updated successfully in database")
         
         # Broadcast the change
         broadcast_database_change('tickets', 'update', {
             'id': ticket_id,
-            'status': status,
+            'status': db_status,
             'comments': comments
         })
         
@@ -5144,6 +5354,62 @@ def update_employee_ticket(ticket_id):
     except Exception as e:
         print(f"âŒ Error updating employee ticket: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/admin/tasks/<int:task_id>/updates', methods=['GET'])
+def get_task_updates_for_task(task_id):
+    """Get updates log for a specific task"""
+    try:
+        execute_query("""
+            CREATE TABLE IF NOT EXISTS task_updates (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                task_id INT NOT NULL,
+                employee_id INT NULL,
+                status VARCHAR(50) NULL,
+                update_message TEXT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+                FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE SET NULL
+            )
+        """)
+
+        query = """
+            SELECT tu.id, tu.status, tu.update_message, tu.created_at,
+                   u.name AS employee_name
+            FROM task_updates tu
+            LEFT JOIN users u ON tu.employee_id = u.id
+            WHERE tu.task_id = %s
+            ORDER BY tu.created_at DESC, tu.id DESC
+        """
+        raw_updates = execute_query(query, (task_id,), fetch_all=True) or []
+
+        updates = []
+        for u in raw_updates:
+            created_at = u.get('created_at')
+            if created_at is not None:
+                try:
+                    iso_value = created_at.isoformat()
+                    if 'Z' not in iso_value and '+' not in iso_value:
+                        iso_value = iso_value + 'Z'
+                    u['created_at'] = iso_value
+                except Exception:
+                    u['created_at'] = str(created_at)
+            updates.append(u)
+
+        return jsonify({'success': True, 'updates': updates})
+    except Exception as e:
+        print(f"Error fetching task updates for task {task_id}: {e}")
+        return jsonify({'success': False, 'error': 'Failed to get updates'}), 500
+
+@app.route('/api/admin/task-updates', methods=['GET'])
+def get_task_updates_query():
+    """Query param variant: /api/admin/task-updates?task_id=123"""
+    try:
+        task_id = request.args.get('task_id', type=int)
+        if not task_id:
+            return jsonify([])
+        return get_task_updates_for_task(task_id)
+    except Exception as e:
+        return jsonify({'success': False, 'error': 'Failed to get updates'}), 500
 
 @app.route('/api/employee/upload-profile-picture', methods=['POST'])
 def upload_profile_picture():
@@ -6178,15 +6444,6 @@ def update_lead_status(lead_id):
 def delete_lead(lead_id):
     """Delete a lead"""
     try:
-        admin_id = session.get('user_id')
-        if not admin_id:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
-        # Check if user is admin
-        admin_check = execute_query("SELECT role FROM admins WHERE id = %s", (admin_id,), fetch_one=True)
-        if not admin_check or admin_check['role'] != 'admin':
-            return jsonify({'error': 'Unauthorized'}), 403
-        
         # Delete lead (cascade will handle assignments)
         query = "DELETE FROM lead_generation_reports WHERE id = %s"
         execute_query(query, (lead_id,))
@@ -7679,23 +7936,183 @@ def get_tenders():
     """Get all tenders"""
     try:
         tender_type = request.args.get('type', 'all')  # 'all', 'government', 'private'
+
+        # Ensure tenders table exists with correct schema
+        try:
+            # First try to create the table
+            execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS tenders (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tender_number VARCHAR(50) NOT NULL UNIQUE,
+                    title VARCHAR(255) NOT NULL,
+                    tender_name VARCHAR(255) NULL,
+                    short_name VARCHAR(100) NULL,
+                    description TEXT NULL,
+                    tender_type ENUM('government', 'private') NOT NULL,
+                    category VARCHAR(255) NULL,
+                    organization_name VARCHAR(255) NULL,
+                    budget_amount DECIMAL(15,2) NULL,
+                    currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+                    published_date DATE NULL,
+                    rfp_date DATE NULL,
+                    submission_deadline DATE NULL,
+                    rfq_date DATE NULL,
+                    opening_date DATE NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'tender_submitted',
+                    query_text TEXT NULL,
+                    contact_person VARCHAR(255) NULL,
+                    contact_email VARCHAR(255) NULL,
+                    contact_phone VARCHAR(50) NULL,
+                    location VARCHAR(255) NULL,
+                    eligibility_criteria TEXT NULL,
+                    documents_required TEXT NULL,
+                    important_documents TEXT NULL,
+                    project_coordinator_id INT NULL,
+                    project_team_ids TEXT NULL,
+                    created_by INT NULL,
+                    updated_by INT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (project_coordinator_id) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+            # If table exists with old schema, alter the status column
+            try:
+                execute_query("ALTER TABLE tenders MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'tender_submitted'")
+            except Exception:
+                pass  # Column might already be correct or doesn't exist yet
+        except Exception as e:
+            print(f"Note: Tenders table may already exist or error creating it: {e}")
         
+        # Create created_tenders table (no unique constraints)
+        try:
+            execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS created_tenders (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tender_number VARCHAR(50) NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    tender_name VARCHAR(255) NULL,
+                    short_name VARCHAR(100) NULL,
+                    description TEXT NULL,
+                    tender_type ENUM('government', 'private') NOT NULL,
+                    category VARCHAR(255) NULL,
+                    organization_name VARCHAR(255) NULL,
+                    budget_amount DECIMAL(15,2) NULL,
+                    currency VARCHAR(3) NOT NULL DEFAULT 'INR',
+                    published_date DATE NULL,
+                    rfp_date DATE NULL,
+                    submission_deadline DATE NULL,
+                    rfq_date DATE NULL,
+                    opening_date DATE NULL,
+                    status VARCHAR(50) NOT NULL DEFAULT 'tender_submitted',
+                    query_text TEXT NULL,
+                    contact_person VARCHAR(255) NULL,
+                    contact_email VARCHAR(255) NULL,
+                    contact_phone VARCHAR(50) NULL,
+                    location VARCHAR(255) NULL,
+                    eligibility_criteria TEXT NULL,
+                    documents_required TEXT NULL,
+                    important_documents TEXT NULL,
+                    project_coordinator_id INT NULL,
+                    project_team_ids TEXT NULL,
+                    created_by INT NULL,
+                    updated_by INT NULL,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (project_coordinator_id) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+        except Exception as e:
+            print(f"Note: created_tenders table may already exist or error creating it: {e}")
+
+        # Ensure tender_updates exists for logging daily updates by employees
+        # No foreign key on tender_id to avoid constraint issues (we'll validate in code)
+        try:
+            execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS tender_updates (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tender_id INT NOT NULL,
+                    employee_id INT NULL,
+                    update_message TEXT NULL,
+                    status VARCHAR(50) NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+            # Remove foreign key on tender_id if it exists (causes issues with table switching)
+            try:
+                # Get constraint names first
+                constraints = execute_query("""
+                    SELECT CONSTRAINT_NAME 
+                    FROM information_schema.KEY_COLUMN_USAGE 
+                    WHERE TABLE_NAME = 'tender_updates' 
+                    AND TABLE_SCHEMA = DATABASE()
+                    AND COLUMN_NAME = 'tender_id'
+                    AND REFERENCED_TABLE_NAME IS NOT NULL
+                """, fetch_all=True)
+                # Drop each constraint that references tender_id
+                if constraints:
+                    for constraint in constraints:
+                        constraint_name = constraint.get('CONSTRAINT_NAME')
+                        if constraint_name:
+                            try:
+                                execute_query(f"ALTER TABLE tender_updates DROP FOREIGN KEY {constraint_name}")
+                            except Exception:
+                                pass
+            except Exception:
+                pass  # Table might not exist or no constraints
+        except Exception:
+            pass
+
         query = """
         SELECT 
-            t.*,
+            t.*, 
             u.name as created_by_name,
             u2.name as updated_by_name,
-            DATEDIFF(t.submission_deadline, CURDATE()) as days_left
-        FROM tenders t
+            DATEDIFF(t.submission_deadline, CURDATE()) as days_left,
+            tu.update_message AS today_update_message,
+            tu.employee_name AS today_update_by
+        FROM created_tenders t
         LEFT JOIN users u ON t.created_by = u.id
         LEFT JOIN users u2 ON t.updated_by = u2.id
+        LEFT JOIN (
+            SELECT 
+                y.tender_id, 
+                y.update_message, 
+                COALESCE(u3.name, 'Unknown') AS employee_name
+            FROM tender_updates y
+            INNER JOIN (
+                SELECT tender_id, MAX(id) AS latest_id
+                FROM tender_updates
+                WHERE DATE(created_at) = CURDATE()
+                GROUP BY tender_id
+            ) x ON y.id = x.latest_id
+            LEFT JOIN users u3 ON y.employee_id = u3.id
+        ) tu ON tu.tender_id = t.id
         """
         
         if tender_type != 'all':
             query += " WHERE t.tender_type = %s"
+            query += " ORDER BY t.created_at DESC"
             tenders = execute_query(query, (tender_type,), fetch_all=True)
         else:
+            query += " ORDER BY t.created_at DESC"
             tenders = execute_query(query, fetch_all=True)
+        
+        # Debug: Print first tender's update_by if exists
+        if tenders and len(tenders) > 0:
+            first_tender = tenders[0]
+            print(f"DEBUG: First tender update_by: {first_tender.get('today_update_by')}, update_message: {first_tender.get('today_update_message')}")
         
         return jsonify(tenders if tenders else [])
         
@@ -7703,58 +8120,393 @@ def get_tenders():
         print(f"Error getting tenders: {e}")
         return jsonify([])
 
+@app.route('/api/admin/tenders/export', methods=['GET'])
+def export_tenders_report():
+    """Export tenders as CSV with columns required by the admin list, including today's latest update log."""
+    try:
+        query = """
+        SELECT 
+            t.id,
+            t.category,
+            COALESCE(t.tender_name, t.title) AS tender_name,
+            t.tender_number,
+            t.status,
+            t.submission_deadline,
+            tu.update_message AS today_update_message,
+            tu.employee_name AS today_update_by
+        FROM created_tenders t
+        LEFT JOIN (
+            SELECT 
+                y.tender_id, 
+                y.update_message, 
+                COALESCE(u.name, 'Unknown') AS employee_name
+            FROM tender_updates y
+            INNER JOIN (
+                SELECT tender_id, MAX(id) AS latest_id
+                FROM tender_updates
+                WHERE DATE(created_at) = CURDATE()
+                GROUP BY tender_id
+            ) x ON y.id = x.latest_id
+            LEFT JOIN users u ON y.employee_id = u.id
+        ) tu ON tu.tender_id = t.id
+        ORDER BY t.created_at DESC
+        """
+
+        rows = execute_query(query, fetch_all=True) or []
+
+        from io import StringIO
+        import csv as _csv
+        import datetime as _dt
+
+        sio = StringIO()
+        writer = _csv.writer(sio)
+        writer.writerow(['No.', 'Department', 'Tender Name', 'Tender Number', 'Status', 'Last Date', 'Today Update (Log)', 'Updated By'])
+        for i, r in enumerate(rows, start=1):
+            last_date = r.get('submission_deadline')
+            if hasattr(last_date, 'strftime'):
+                last_date = last_date.strftime('%Y-%m-%d')
+            writer.writerow([
+                i,
+                r.get('category') or '',
+                r.get('tender_name') or '',
+                r.get('tender_number') or '',
+                r.get('status') or '',
+                last_date or '',
+                r.get('today_update_message') or '',
+                r.get('today_update_by') or ''
+            ])
+
+        csv_data = sio.getvalue()
+        sio.close()
+
+        filename = f"tenders_report_{_dt.date.today().isoformat()}.csv"
+        response = make_response(csv_data)
+        response.headers['Content-Type'] = 'text/csv; charset=utf-8'
+        response.headers['Content-Disposition'] = f'attachment; filename={filename}'
+        return response
+    except Exception as e:
+        print(f"Error exporting tenders: {e}")
+        return jsonify({'success': False, 'message': 'Failed to export'}), 500
+
+@app.route('/api/employee/tenders/<int:tender_id>/update', methods=['POST'])
+def update_employee_tender(tender_id):
+    """Allow employees to submit updates/comments for assigned tenders"""
+    try:
+        data = request.get_json()
+        employee_id = data.get('employee_id')
+        update_message = data.get('update_message', '').strip()
+        status = data.get('status')
+        
+        if not employee_id:
+            return jsonify({'success': False, 'message': 'Employee ID is required'}), 400
+        
+        if not update_message:
+            return jsonify({'success': False, 'message': 'Update message is required'}), 400
+        
+        # Ensure tender_updates table exists (no foreign key on tender_id to avoid constraint issues)
+        try:
+            execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS tender_updates (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tender_id INT NOT NULL,
+                    employee_id INT NULL,
+                    update_message TEXT NULL,
+                    status VARCHAR(50) NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (employee_id) REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+            # Remove foreign key on tender_id if it exists (causes issues with table switching)
+            try:
+                constraints = execute_query("""
+                    SELECT CONSTRAINT_NAME 
+                    FROM information_schema.KEY_COLUMN_USAGE 
+                    WHERE TABLE_NAME = 'tender_updates' 
+                    AND TABLE_SCHEMA = DATABASE()
+                    AND COLUMN_NAME = 'tender_id'
+                    AND REFERENCED_TABLE_NAME IS NOT NULL
+                """, fetch_all=True)
+                if constraints:
+                    for constraint in constraints:
+                        constraint_name = constraint.get('CONSTRAINT_NAME')
+                        if constraint_name:
+                            try:
+                                execute_query(f"ALTER TABLE tender_updates DROP FOREIGN KEY {constraint_name}")
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+        except Exception:
+            pass
+        
+        # Verify employee is assigned to this tender (in project_coordinator_id or project_team_ids)
+        tender_query = "SELECT project_coordinator_id, project_team_ids FROM created_tenders WHERE id = %s"
+        tender_data = execute_query(tender_query, (tender_id,), fetch_one=True)
+        # Safety: some drivers or wrappers may still return a list; normalize it
+        if isinstance(tender_data, list):
+            tender_data = tender_data[0] if len(tender_data) > 0 else None
+        
+        if not tender_data:
+            return jsonify({'success': False, 'message': 'Tender not found'}), 404
+        
+        # Check if employee is assigned
+        coordinator_id = tender_data.get('project_coordinator_id')
+        team_ids_json = tender_data.get('project_team_ids')
+        team_ids = []
+        
+        if team_ids_json:
+            try:
+                import json
+                team_ids = json.loads(team_ids_json) if isinstance(team_ids_json, str) else team_ids_json
+                if not isinstance(team_ids, list):
+                    team_ids = []
+            except:
+                team_ids = []
+        
+        is_assigned = (
+            (coordinator_id and int(coordinator_id) == int(employee_id)) or
+            (int(employee_id) in [int(tid) for tid in team_ids if tid])
+        )
+        
+        if not is_assigned:
+            return jsonify({'success': False, 'message': 'You are not assigned to this tender'}), 403
+        
+        # Insert update record
+        insert_query = """
+        INSERT INTO tender_updates (tender_id, employee_id, update_message, status)
+        VALUES (%s, %s, %s, %s)
+        """
+        execute_query(insert_query, (tender_id, employee_id, update_message, status))
+        
+        # Optionally update tender status if provided
+        if status:
+            update_tender_query = "UPDATE created_tenders SET status = %s WHERE id = %s"
+            execute_query(update_tender_query, (status, tender_id))
+        
+        # Broadcast database change for real-time updates
+        try:
+            socketio.emit('database_change', {
+                'table': 'tenders',
+                'action': 'update',
+                'id': tender_id
+            }, room='admin')
+        except:
+            pass
+        
+        return jsonify({
+            'success': True,
+            'message': 'Tender update submitted successfully'
+        })
+        
+    except Exception as e:
+        print(f"Error updating tender from employee: {e}")
+        return jsonify({'success': False, 'message': 'Failed to submit update'}), 500
+
 @app.route('/api/admin/tenders', methods=['POST'])
 def create_tender():
     """Create a new tender"""
     try:
         data = request.get_json()
+        print(f"📝 Creating tender with data: {json.dumps(data, indent=2)}")
         
-        required_fields = ['tender_number', 'title', 'tender_type', 'status']
+        required_fields = ['tender_number', 'title', 'tender_type']
         for field in required_fields:
             if not data.get(field):
+                print(f"❌ Missing required field: {field}")
                 return jsonify({'success': False, 'message': f'{field} is required'}), 400
         
+        # Default status 'tender_submitted' for creation
+        status_value = data.get('status') or 'tender_submitted'
+        
+        # No uniqueness check needed - created_tenders allows duplicates
+        
+        # Helper functions to convert empty strings to None for optional fields
+        def clean_value(val):
+            if val == '' or val is None:
+                return None
+            return val
+        
+        def clean_json_value(val):
+            if not val or (isinstance(val, list) and len(val) == 0):
+                return None
+            return json.dumps(val) if val else None
+        
+        def clean_budget_amount(val):
+            """Convert budget_amount to float or None"""
+            if not val or val == '':
+                return None
+            try:
+                return float(val) if isinstance(val, str) else val
+            except (ValueError, TypeError):
+                return None
+        
+        # Validate foreign key references before inserting
+        # IMPORTANT: Always start with None - only set if we can VERIFY the user exists
+        created_by_id = None
+        project_coord_id = clean_value(data.get('project_coordinator_id')) if data.get('project_coordinator_id') else None
+        
+        # Strict helper to verify user exists - returns user_id only if verified, None otherwise
+        def verify_user_exists(user_id):
+            if not user_id:
+                return None
+            try:
+                result = execute_query("SELECT id FROM users WHERE id = %s", (int(user_id),), fetch_one=True)
+                # Explicit check: result must be a dict with an 'id' key that matches
+                if result and isinstance(result, dict) and result.get('id') == int(user_id):
+                    return int(user_id)
+                return None
+            except Exception as e:
+                print(f"⚠️ Error verifying user {user_id}: {e}")
+                return None
+        
+        # Try session user first
+        session_user_id = session.get('user_id')
+        if session_user_id:
+            verified = verify_user_exists(session_user_id)
+            if verified:
+                created_by_id = verified
+                print(f"✅ Using verified session user_id: {created_by_id}")
+            else:
+                print(f"⚠️ Session user_id {session_user_id} verification failed, trying fallback...")
+                created_by_id = None
+        
+        # Fallback: try user ID 1 ONLY if we still don't have a verified user
+        if created_by_id is None:
+            verified = verify_user_exists(1)
+            if verified:
+                created_by_id = verified
+                print(f"✅ Using verified fallback user_id: {created_by_id}")
+            else:
+                print(f"⚠️ Fallback user_id 1 verification failed, using NULL for created_by")
+                created_by_id = None
+        
+        # Validate project_coordinator_id
+        if project_coord_id:
+            verified = verify_user_exists(project_coord_id)
+            if verified:
+                project_coord_id = verified
+                print(f"✅ Verified project_coordinator_id: {project_coord_id}")
+            else:
+                print(f"⚠️ project_coordinator_id {project_coord_id} verification failed, setting to NULL")
+                project_coord_id = None
+        
+        # CRITICAL FINAL CHECK: Force None if verification fails
+        if created_by_id is not None:
+            final_verify = verify_user_exists(created_by_id)
+            if final_verify is None:
+                print(f"🚨 CRITICAL: created_by_id {created_by_id} failed final verification! Forcing to NULL")
+                created_by_id = None
+        
+        print(f"✅✅✅ FINAL VALUES: created_by_id={created_by_id} (type={type(created_by_id).__name__}), project_coord_id={project_coord_id}")
+        
         query = """
-        INSERT INTO tenders (
-            tender_number, title, description, tender_type, category,
-            organization_name, budget_amount, currency, published_date,
-            submission_deadline, opening_date, status, contact_person,
-            contact_email, contact_phone, location, eligibility_criteria,
-            documents_required, important_documents, created_by
+        INSERT INTO created_tenders (
+            tender_number, title, tender_name, short_name, description, tender_type, category,
+            organization_name, budget_amount, currency, published_date, rfp_date,
+            submission_deadline, rfq_date, opening_date, status, query_text, contact_person,
+            contact_email, contact_phone, location, eligibility_criteria, documents_required,
+            important_documents, project_coordinator_id, project_team_ids, created_by
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         """
         
         params = (
-            data.get('tender_number'),
-            data.get('title'),
-            data.get('description', ''),
-            data.get('tender_type'),
-            data.get('category', ''),
-            data.get('organization_name', ''),
-            data.get('budget_amount'),
-            data.get('currency', 'INR'),
-            data.get('published_date'),
-            data.get('submission_deadline'),
-            data.get('opening_date'),
-            data.get('status'),
-            data.get('contact_person', ''),
-            data.get('contact_email', ''),
-            data.get('contact_phone', ''),
-            data.get('location', ''),
-            data.get('eligibility_criteria', ''),
-            data.get('documents_required', ''),
-            json.dumps(data.get('important_documents', [])),
-            1  # created_by - admin ID
+            data.get('tender_number'),                                    # 1
+            data.get('title'),                                             # 2
+            clean_value(data.get('tender_name', data.get('title'))),      # 3
+            clean_value(data.get('short_name')),                          # 4
+            clean_value(data.get('description')),                         # 5
+            data.get('tender_type'),                                      # 6
+            clean_value(data.get('category')),                            # 7
+            clean_value(data.get('organization_name')),                   # 8
+            clean_budget_amount(data.get('budget_amount')),                # 9
+            data.get('currency', 'INR'),                                  # 10
+            clean_value(data.get('published_date')),                     # 11
+            clean_value(data.get('rfp_date')),                            # 12
+            clean_value(data.get('submission_deadline')),                # 13
+            clean_value(data.get('rfq_date', data.get('submission_deadline'))), # 14
+            clean_value(data.get('opening_date')),                       # 15
+            status_value,                                                  # 16
+            clean_value(data.get('query', data.get('query_text'))),      # 17
+            clean_value(data.get('contact_person')),                     # 18
+            clean_value(data.get('contact_email')),                      # 19
+            clean_value(data.get('contact_phone')),                      # 20
+            clean_value(data.get('location')),                            # 21
+            clean_value(data.get('eligibility_criteria')),                # 22
+            clean_value(data.get('documents_required')),                  # 23
+            clean_json_value(data.get('important_documents')),           # 24
+            project_coord_id,                                             # 25 (validated)
+            clean_json_value(data.get('project_team_ids')),               # 26
+            created_by_id                                                 # 27 (validated or None)
         )
         
-        execute_query(query, params)
-        return jsonify({'success': True, 'message': 'Tender created successfully'})
+        # Verify parameter count matches placeholders (27 expected)
+        expected_params = 27
+        actual_params = len(params)
+        if actual_params != expected_params:
+            print(f"❌ Parameter count mismatch! Expected {expected_params}, got {actual_params}")
+            return jsonify({
+                'success': False, 
+                'message': f'Internal error: Parameter count mismatch ({actual_params} vs {expected_params})'
+            }), 500
+        
+        # Execute INSERT query
+        print(f"🔍 Executing INSERT with {len(params)} parameters")
+        print(f"📋 First few params: tender_number={params[0]}, title={params[1]}, type={params[5]}")
+        print(f"🔑 Foreign keys in params: project_coordinator_id={params[24]}, created_by={params[26]}")
+        result = execute_query(query, params)
+        
+        # Check if INSERT failed (execute_query returns None on error)
+        if result is None:
+            print("❌ INSERT query returned None - check error logs above")
+            return jsonify({'success': False, 'message': 'Failed to insert tender into database. Check server logs for details.'}), 500
+        
+        # Fetch the created tender - get the most recent one with this tender_number (since duplicates allowed)
+        created_tender = execute_query(
+            """
+            SELECT 
+                t.*, 
+                u.name as created_by_name,
+                DATEDIFF(t.submission_deadline, CURDATE()) as days_left
+            FROM created_tenders t
+            LEFT JOIN users u ON t.created_by = u.id
+            WHERE t.tender_number = %s
+            ORDER BY t.created_at DESC
+            LIMIT 1
+            """,
+            (data.get('tender_number'),),
+            fetch_one=True
+        )
+
+        # Broadcast database change (id may be null if not fetched, but the admin can reload list)
+        try:
+            socketio.emit('database_change', {
+                'table': 'tenders',
+                'action': 'create',
+                'id': created_tender.get('id') if created_tender else None
+            }, room='admin')
+        except:
+            pass
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Tender created successfully',
+            'tender': created_tender if created_tender else None
+        })
         
     except Exception as e:
-        print(f"Error creating tender: {e}")
-        return jsonify({'success': False, 'message': 'Failed to create tender'}), 500
+        error_msg = str(e)
+        print(f"Error creating tender: {error_msg}")
+        # Provide more specific error messages
+        if 'Duplicate entry' in error_msg or 'UNIQUE' in error_msg:
+            return jsonify({'success': False, 'message': 'Tender number must be unique'}), 400
+        elif 'Table' in error_msg and "doesn't exist" in error_msg:
+            return jsonify({'success': False, 'message': 'Database table not initialized. Please refresh the page and try again.'}), 500
+        else:
+            return jsonify({'success': False, 'message': f'Failed to create tender: {error_msg}'}), 500
 
 @app.route('/api/admin/tenders/<int:tender_id>', methods=['PUT'])
 def update_tender(tender_id):
@@ -7763,18 +8515,21 @@ def update_tender(tender_id):
         data = request.get_json()
         
         query = """
-        UPDATE tenders 
-        SET title = %s, description = %s, tender_type = %s, category = %s,
+        UPDATE created_tenders 
+        SET title = %s, tender_name = %s, short_name = %s, description = %s, tender_type = %s, category = %s,
             organization_name = %s, budget_amount = %s, currency = %s,
-            published_date = %s, submission_deadline = %s, opening_date = %s,
-            status = %s, contact_person = %s, contact_email = %s,
+            published_date = %s, rfp_date = %s, submission_deadline = %s, rfq_date = %s, opening_date = %s,
+            status = %s, query_text = %s, contact_person = %s, contact_email = %s,
             contact_phone = %s, location = %s, eligibility_criteria = %s,
-            documents_required = %s, important_documents = %s, updated_by = %s
+            documents_required = %s, important_documents = %s,
+            project_coordinator_id = %s, project_team_ids = %s, updated_by = %s
         WHERE id = %s
         """
         
         params = (
             data.get('title'),
+            data.get('tender_name', data.get('title')),
+            data.get('short_name', ''),
             data.get('description', ''),
             data.get('tender_type'),
             data.get('category', ''),
@@ -7782,9 +8537,12 @@ def update_tender(tender_id):
             data.get('budget_amount'),
             data.get('currency', 'INR'),
             data.get('published_date'),
+            data.get('rfp_date'),
             data.get('submission_deadline'),
+            data.get('rfq_date', data.get('submission_deadline')),
             data.get('opening_date'),
             data.get('status'),
+            data.get('query', data.get('query_text', '')),
             data.get('contact_person', ''),
             data.get('contact_email', ''),
             data.get('contact_phone', ''),
@@ -7792,6 +8550,8 @@ def update_tender(tender_id):
             data.get('eligibility_criteria', ''),
             data.get('documents_required', ''),
             json.dumps(data.get('important_documents', [])),
+            data.get('project_coordinator_id'),
+            json.dumps(data.get('project_team_ids', [])),
             1,  # updated_by - admin ID
             tender_id
         )
@@ -7807,7 +8567,7 @@ def update_tender(tender_id):
 def delete_tender(tender_id):
     """Delete a tender"""
     try:
-        query = "DELETE FROM tenders WHERE id = %s"
+        query = "DELETE FROM created_tenders WHERE id = %s"
         execute_query(query, (tender_id,))
         return jsonify({'success': True, 'message': 'Tender deleted successfully'})
         

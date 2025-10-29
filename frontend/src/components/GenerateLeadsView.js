@@ -703,7 +703,11 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
                          lead.project_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          lead.client_email?.toLowerCase().includes(searchTerm.toLowerCase());
     
-    const matchesStatus = statusFilter === 'all' || lead.lead_status === statusFilter;
+    // Case-insensitive status comparison
+    const leadStatusNormalized = lead.lead_status?.toLowerCase().trim() || '';
+    const statusFilterNormalized = statusFilter === 'all' ? 'all' : statusFilter.toLowerCase().trim();
+    const matchesStatus = statusFilterNormalized === 'all' || leadStatusNormalized === statusFilterNormalized;
+    
     const matchesEmployee = employeeFilter === 'all' || lead.assigned_to?.toString() === employeeFilter;
     
     return matchesSearch && matchesStatus && matchesEmployee;
@@ -726,12 +730,15 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
   });
 
   const getStatusColor = (status) => {
-    switch (status) {
+    switch (status?.toLowerCase()) {
       case 'new': return 'bg-blue-100 text-blue-800';
-      case 'contacted': return 'bg-yellow-100 text-yellow-800';
-      case 'qualified': return 'bg-green-100 text-green-800';
-      case 'proposal': return 'bg-purple-100 text-purple-800';
+      case 'in progress': return 'bg-blue-100 text-blue-800';
+      case 'in discussion': return 'bg-yellow-100 text-yellow-800';
+      case 'proposal sent': return 'bg-purple-100 text-purple-800';
       case 'negotiation': return 'bg-orange-100 text-orange-800';
+      case 'closed won': return 'bg-green-100 text-green-800';
+      case 'closed lost': return 'bg-red-100 text-red-800';
+      // Keep backwards compatibility with old underscore format
       case 'closed_won': return 'bg-green-100 text-green-800';
       case 'closed_lost': return 'bg-red-100 text-red-800';
       default: return 'bg-gray-100 text-gray-800';
@@ -800,7 +807,7 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
             <div>
               <p className="text-sm font-medium text-gray-600">New Leads</p>
               <p className="text-2xl font-bold text-gray-900">
-                {leads.filter(lead => lead.lead_status === 'new').length}
+                {leads.filter(lead => lead.lead_status?.toLowerCase() === 'new').length}
               </p>
             </div>
             <Bell className="h-8 w-8 text-yellow-600" />
@@ -827,7 +834,7 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
             <div>
               <p className="text-sm font-medium text-gray-600">Closed Won</p>
               <p className="text-2xl font-bold text-gray-900">
-                {leads.filter(lead => lead.lead_status === 'closed_won').length}
+                {leads.filter(lead => lead.lead_status?.toLowerCase().replace(/[_\s]/g, '') === 'closedwon').length}
               </p>
             </div>
             <CheckCircle className="h-8 w-8 text-green-600" />
@@ -858,12 +865,12 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
           >
             <option value="all">All Statuses</option>
             <option value="new">New</option>
-            <option value="contacted">Contacted</option>
-            <option value="qualified">Qualified</option>
-            <option value="proposal">Proposal</option>
+            <option value="in progress">In Progress</option>
+            <option value="in discussion">In Discussion</option>
+            <option value="proposal sent">Proposal Sent</option>
             <option value="negotiation">Negotiation</option>
-            <option value="closed_won">Closed Won</option>
-            <option value="closed_lost">Closed Lost</option>
+            <option value="closed won">Closed Won</option>
+            <option value="closed lost">Closed Lost</option>
           </select>
           
           {!isEmployee && (
@@ -961,16 +968,16 @@ const GenerateLeadsView = ({ showNotification, user, isEmployee = false }) => {
                         className={`text-xs font-medium px-2 py-1 rounded-full ${getStatusColor(lead.lead_status)} border-0 focus:ring-2 focus:ring-amber-500`}
                       >
                         <option value="new">New</option>
-                        <option value="contacted">Contacted</option>
-                        <option value="qualified">Qualified</option>
-                        <option value="proposal">Proposal</option>
+                        <option value="in progress">In Progress</option>
+                        <option value="in discussion">In Discussion</option>
+                        <option value="proposal sent">Proposal Sent</option>
                         <option value="negotiation">Negotiation</option>
-                        <option value="closed_won">Closed Won</option>
-                        <option value="closed_lost">Closed Lost</option>
+                        <option value="closed won">Closed Won</option>
+                        <option value="closed lost">Closed Lost</option>
                       </select>
                     ) : (
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(lead.lead_status)}`}>
-                        {lead.lead_status?.replace('_',' ') || 'N/A'}
+                        {lead.lead_status?.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ') || 'N/A'}
                       </span>
                     )}
                   </td>
