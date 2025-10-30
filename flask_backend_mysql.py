@@ -3233,6 +3233,32 @@ def update_project(project_id):
         }
         db_priority = priority_mapping.get(priority.lower(), 'medium')
         
+        # Normalize dates to YYYY-MM-DD to avoid MySQL date errors
+        def normalize_date(val):
+            if not val:
+                return None
+            try:
+                # ISO or date-like strings
+                if isinstance(val, str):
+                    if 'T' in val:
+                        return val.split('T')[0]
+                    if ',' in val and 'GMT' in val:
+                        from datetime import datetime
+                        try:
+                            dt = datetime.strptime(val, '%a, %d %b %Y %H:%M:%S %Z')
+                            return dt.strftime('%Y-%m-%d')
+                        except Exception:
+                            pass
+                    # Fallback: first 10 chars if looks like date
+                    if len(val) >= 10:
+                        return val[:10]
+                return val
+            except Exception:
+                return None
+
+        start_date = normalize_date(start_date)
+        end_date = normalize_date(end_date)
+
         query = """
         UPDATE projects 
         SET name = %s, description = %s, status = %s, priority = %s, 
@@ -3465,6 +3491,36 @@ def submit_vendor_nda():
         execute_query(query, (signature, stamp_data, company_name, contact_person, phone, address, reference_number))
         print(f"✅ Vendor record updated successfully")
         
+        # Insert a record into nda_forms to appear in admin list
+        try:
+            # Find vendor id
+            vrow = execute_query("SELECT id FROM vendors WHERE reference_number = %s", (reference_number,), fetch_one=True)
+            vendor_id = vrow.get('id') if vrow else None
+            if vendor_id:
+                import json as _json
+                form_payload = {
+                    'company_name': company_name,
+                    'contact_person': contact_person,
+                    'email': email,
+                    'phone': phone,
+                    'address': address,
+                    'signature_data': signature,
+                    'company_stamp_data': stamp_data,
+                    'signature_type': 'drawn',
+                    'reference_number': reference_number
+                }
+                execute_query(
+                    """
+                    INSERT INTO nda_forms (vendor_id, form_data, status, signed_at, created_at, updated_at)
+                    VALUES (%s, %s, 'signed', NOW(), NOW(), NOW())
+                    """,
+                    (vendor_id, _json.dumps(form_payload))
+                )
+            else:
+                print(f"⚠️ Vendor not found for reference {reference_number}; skipping nda_forms insert")
+        except Exception as insert_err:
+            print(f"⚠️ Failed inserting into nda_forms: {insert_err}")
+
         # Send confirmation email to vendor
         try:
             smtp = get_smtp_settings()
@@ -3513,6 +3569,14 @@ Address: Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India""
             print(f"⚠️ Failed to send confirmation email: {email_error}")
             # Don't fail the NDA submission if email fails
         
+        # Broadcast to admin views so NDA list updates in real-time
+        try:
+            socketio.emit('database_change', {
+                'table': 'nda_forms',
+                'action': 'create'
+            }, room='admin')
+        except:
+            pass
         return jsonify({'success': True, 'message': 'NDA submitted successfully'})
         
     except Exception as e:
@@ -3934,6 +3998,7 @@ def download_nda_pdf(reference_number):
         vendor_query = """
         SELECT company_name, contact_person, email, phone, address, 
                business_type, reference_number, signature_type,
+               signature_data, company_stamp_data,
                CASE WHEN signature_data IS NOT NULL AND signature_data != '' THEN 1 ELSE 0 END as has_signature,
                CASE WHEN company_stamp_data IS NOT NULL AND company_stamp_data != '' THEN 1 ELSE 0 END as has_stamp
         FROM vendors
@@ -3945,8 +4010,6 @@ def download_nda_pdf(reference_number):
             return jsonify({'error': 'Vendor not found'}), 404
         
         vendor_data['signed_date'] = nda_form['signed_at']
-        vendor_data['signature_data'] = bool(vendor_data.get('has_signature'))
-        vendor_data['company_stamp_data'] = bool(vendor_data.get('has_stamp'))
         
         # Create PDF
         buffer = BytesIO()
@@ -3954,87 +4017,139 @@ def download_nda_pdf(reference_number):
         styles = getSampleStyleSheet()
         story = []
         
-        # Title
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=30,
-            alignment=1  # Center alignment
-        )
+        # Title and non-table header placements
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=18, spaceAfter=12, alignment=1)
         story.append(Paragraph("NON-DISCLOSURE AGREEMENT", title_style))
-        story.append(Spacer(1, 20))
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        story.append(Paragraph(f"Reference Number: {vendor_data['reference_number'] or reference_number}", ParagraphStyle('left', parent=styles['Normal'], alignment=0)))
+        story.append(Paragraph(f"Vendor Email: {vendor_data['email'] or 'N/A'}", ParagraphStyle('right', parent=styles['Normal'], alignment=2)))
+        story.append(Spacer(1, 10))
         
-        # Company Information
-        story.append(Paragraph("Company Information:", styles['Heading2']))
-        story.append(Spacer(1, 12))
-        
-        company_info = [
-            ['Company Name:', vendor_data['company_name'] or 'N/A'],
-            ['Contact Person:', vendor_data['contact_person'] or 'N/A'],
-            ['Email:', vendor_data['email'] or 'N/A'],
-            ['Phone:', vendor_data['phone'] or 'N/A'],
-            ['Address:', vendor_data['address'] or 'N/A'],
-            ['Business Type:', vendor_data['business_type'] or 'N/A'],
-            ['Reference Number:', vendor_data['reference_number'] or 'N/A'],
-            ['Signed Date:', vendor_data['signed_date'].strftime('%Y-%m-%d') if vendor_data.get('signed_date') else 'N/A']
-        ]
-        
-        company_table = Table(company_info, colWidths=[2*inch, 4*inch])
-        company_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        story.append(company_table)
-        story.append(Spacer(1, 20))
-        
-        # NDA Terms (simplified version)
-        story.append(Paragraph("Agreement Terms:", styles['Heading2']))
-        story.append(Spacer(1, 12))
-        
-        terms = [
-            "1. Confidential Information: The parties acknowledge that they may receive confidential and proprietary information.",
-            "2. Non-Disclosure: Each party agrees not to disclose confidential information to third parties.",
-            "3. Use Limitation: Confidential information shall only be used for the purpose of evaluating business opportunities.",
-            "4. Return of Information: Upon request, all confidential information shall be returned or destroyed.",
-            "5. Term: This agreement shall remain in effect for a period of 5 years from the date of signing.",
-            "6. Governing Law: This agreement shall be governed by the laws of the jurisdiction where YellowStone Group operates."
-        ]
-        
-        for term in terms:
-            story.append(Paragraph(term, styles['Normal']))
+        # No top signature; it will be shown near the bottom
+
+        # Agreement clauses – full template text and improved readability
+        body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=11, leading=14)
+        story.append(Paragraph("<b>Confidentiality & Nondisclosure Agreement (NDA)</b>", styles['Heading2']))
+        story.append(Spacer(1, 6))
+        today_str = datetime.now().strftime('%d, %B, %Y')
+        story.append(Paragraph(
+            f"This agreement is entered into on {today_str}, by and among:", body))
+        story.append(Spacer(1, 4))
+        story.append(Paragraph(
+            "(1) YellowStone  Xperiences  Pvt  Ltd,  a  company incorporated and existing under the laws of Company Act, India, having its registered office at Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India, registered with the company registration number U72900PB2020PTC051260, hereinafter referred to as ‘YSXP’, And",
+            body
+        ))
+        story.append(Paragraph(
+            f"(2) {vendor_data.get('company_name') or '_____________________________________________'}, a company incorporated and existing under the laws of Company Act, India, having its registered office at {vendor_data.get('address') or '________________ _________________________________________'}, registered with the company registration number {'_______________________________________'}, hereinafter referred to as ‘{vendor_data.get('company_name') or '________'}’.",
+            body
+        ))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(
+            "hereinafter also referred to individually as a ‘Party’ and collectively as the ‘Parties’.",
+            body
+        ))
+        story.append(Spacer(1, 10))
+
+        def section(title, text):
+            story.append(Paragraph(f"<b>{title}</b>", body))
+            story.append(Paragraph(text, body))
             story.append(Spacer(1, 6))
+
+        section("1. PURPOSE",
+            "In connection with discussions between YellowStone Xperiences Pvt Ltd and _______________ concerning Company’s Local representative under capacity of Strategic Partnership for cross selling of products and services. In order to pursue this Purpose, the Parties recognize that there is a need to disclose certain confidential information by the Disclosing Party (i.e., Party disclosing such information) to Receiving Party (i.e., Party receiving such information) to be used only for this Purpose and to protect such confidential information from unauthorized use and disclosure. The Disclosing Party has agreed to disclose to the Receiving Party the confidential information on a strictly confidential basis.")
+
+        section("2. DEFINITION OF CONFIDENTIAL INFORMATION",
+            "‘Confidential Information’ shall mean all information, whether disclosed before or after the Effective Date, that is disclosed in written, oral, electronic, visual or other form by either party (each, as a ‘Disclosing Party’) to the other party (each, as a ‘Receiving Party’) and either (i) marked or designated as ‘confidential’ or ‘proprietary’ at the time of disclosure or (ii) otherwise clearly indicated to be confidential at the time of disclosure. Confidential Information may include, without limitation, computer programs, software or hardware products, product development plans, drawings, models, proposed services, discoveries, ideas, concepts, equipment, code, software source documents and related technical information, algorithms, know‑how, trade secrets, formulas, processes, procedures, research, inventions (whether patentable or not), copyrights, schematics and other technical, names and expertise of employees and consultants and customer or partner information.")
+
+        section("3. CONFIDENTIALITY OBLIGATION",
+            "Receiving Party agrees to protect the Confidential Information by using the same degree of care as Receiving Party uses to protect its own confidential or proprietary information (but not less than a reasonable degree of care): (i) to prevent the unauthorized use, dissemination or publication of the Confidential Information (ii) not to divulge Confidential Information to any third party, (iii) not to make any use of such Confidential Information except for the Business Purpose, and (iv) not to copy except as reasonably required in direct support of the Business Purpose. Any copies made will include appropriate marking identifying same as constituting or containing Confidential Information of Disclosing Party; and (v) not to reverse engineer any such Confidential Information. Receiving Party shall limit the use of and access to Disclosing Party’s Confidential Information to Receiving Party’s employees and to the employees of Receiving Party’s respective parent, subsidiaries and affiliated entities or authorized representatives who have: (i) a need to know and have been notified that such information is Confidential Information to be used solely for the Business Purpose; and (ii) entered into binding confidentiality obligations no less protective of Disclosing Party than those contained in this Agreement. Receiving Party may disclose Confidential Information pursuant to any statutory or regulatory authority or court order, provided Disclosing Party is given prompt prior written notice of such requirement and the scope of such disclosure is limited to the extent possible.")
+
+        section("4. NON-DISCLOSURE OF CONFIDENTIAL INFORMATION",
+            "Receiving Party shall only permit access to Confidential Information to those of its employees or authorized representatives who have a need to know and shall not disclose it to third parties.")
+
+        section("5. RETURN OF CONFIDENTIAL INFORMATION",
+            "All Confidential Information furnished under this Agreement, shall remain the property of the Disclosing Party and shall be returned to it without retaining any copies or it shall be destroyed all documents and other materials promptly upon the termination of this Agreement under the consent of both parties or any breach of contract made by either party.")
+
+        section("6. TERM",
+            "This Agreement shall come into force from the effective date of this deed and shall continue for two (2) years from the Effective Date, unless earlier terminated by either Party with 30 days’ prior written notice.")
+
+        section("7. GOVERNING LAW",
+            "This Agreement shall be governed in all respects in accordance with the laws of Mohali, Punjab, India.")
+
+        section("8. AMENDMENTS, FILLING, CANCELLATION, TERMINATION AND RENEWAL OF AGREEMENT",
+            "Any term of this Agreement may be amended, filled, cancelled, terminated and renewed under the written mutual consent of the parties. This said all matters shall be done by giving 30 days advance written notice each other.")
+
+        section("9. REMEDIES",
+            "If a party breaches this NDA, this party must be taken the action under the laws of Mohali, Punjab, India. However, on mutual agreement of both parties the geographical location can be changed and accordingly the law of land would be followed. The parties agree that if it is in any breach of this Agreement, including without limiting any actual or threatened disclosure of Confidential Information without the prior expressed written consent of the disclosing party for which no adequate remedy under law exists, the injured party shall have right not only to terminate the Agreement but also the entitlement for equitable remedies, injunctive relief and specific performance to redress any breach or threatened breach of this Agreement made directly and indirectly by the receiving party or any of its advisors or Affiliates, or any other persons acting for or on behalf of or with the receiving party.")
+
+        section("10. VALID NOTICES",
+            "All notices under this Agreement shall be deemed to have been duly given upon the mailing of the notice, in person or by courier, sent by fax, e‑mail to the Party entitled to such notice at the address.")
+        story.append(Spacer(1, 10))
         
-        story.append(Spacer(1, 20))
-        
-        # Signature Section
+        # Helper to clean base64 strings
+        def _clean_b64(b64s):
+            if not b64s:
+                return None
+            s = b64s
+            if isinstance(s, bytes):
+                s = s.decode('utf-8', errors='ignore')
+            if ',' in s and s.strip().startswith('data:'):
+                s = s.split(',', 1)[1]
+            missing = len(s) % 4
+            if missing:
+                s += '=' * (4 - missing)
+            return s
+
+        # Signatures table with vendor signature inside right column
         story.append(Paragraph("Signatures:", styles['Heading2']))
-        story.append(Spacer(1, 12))
-        
-        signature_info = [
-            ['Signature Type:', vendor_data.get('signature_type', 'Digital') or 'Digital'],
-            ['Signature Present:', 'Yes' if vendor_data.get('signature_data') else 'No'],
-            ['Company Stamp Present:', 'Yes' if vendor_data.get('company_stamp_data') else 'No']
-        ]
-        
-        signature_table = Table(signature_info, colWidths=[2*inch, 4*inch])
-        signature_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey),
-            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-            ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        story.append(signature_table)
+        story.append(Spacer(1, 8))
+        try:
+            def _clean_b64(b64s):
+                if not b64s:
+                    return None
+                s = b64s
+                if isinstance(s, bytes):
+                    s = s.decode('utf-8', errors='ignore')
+                if ',' in s and s.strip().startswith('data:'):
+                    s = s.split(',', 1)[1]
+                missing = len(s) % 4
+                if missing:
+                    s += '=' * (4 - missing)
+                return s
+
+            sig_b64 = _clean_b64(form_data.get('signature_data') or vendor_data.get('signature_data'))
+            sig_img_el = ''
+            if sig_b64:
+                import base64
+                sig_img_el = Image(BytesIO(base64.b64decode(sig_b64)), width=2.5*inch, height=0.9*inch)
+            sig_table = Table([
+                ['For YSXP:', 'For Vendor:'],
+                ['Signature:', sig_img_el if sig_img_el else 'Signature: _____________________________'],
+                ['Name:', vendor_data.get('contact_person') or ''],
+                ['Title:', ''],
+                ['Date:', vendor_data['signed_date'].strftime('%Y-%m-%d') if vendor_data.get('signed_date') else ''],
+            ], colWidths=[3*inch, 3*inch])
+            sig_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('FONTSIZE', (0,0), (-1,-1), 9),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+            ]))
+            story.append(sig_table)
+            story.append(Spacer(1, 10))
+        except Exception as _e:
+            print(f"Download signature render error: {_e}")
+
+        # Company Information as lines (no table)
+        info_style = ParagraphStyle('info', parent=styles['Normal'], fontSize=10, leading=13)
+        story.append(Paragraph(f"Company Name: {vendor_data['company_name'] or 'N/A'}", info_style))
+        story.append(Paragraph(f"Contact Person: {vendor_data['contact_person'] or 'N/A'}", info_style))
+        story.append(Paragraph(f"Email: {vendor_data['email'] or 'N/A'}", info_style))
+        story.append(Paragraph(f"Phone: {vendor_data['phone'] or 'N/A'}", info_style))
+        story.append(Paragraph(f"Address: {vendor_data['address'] or 'N/A'}", info_style))
+        story.append(Paragraph(f"Business Type: {vendor_data['business_type'] or 'N/A'}", info_style))
+        story.append(Paragraph(f"Signed Date: {vendor_data['signed_date'].strftime('%Y-%m-%d') if vendor_data.get('signed_date') else 'N/A'}", info_style))
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(f"Timestamp: {ts}", ParagraphStyle('footer_ts', parent=styles['Normal'], alignment=2)))
         
         doc.build(story)
         buffer.seek(0)
@@ -4052,59 +4167,244 @@ def download_nda_pdf(reference_number):
 
 @app.route('/api/admin/send-completed-nda-email', methods=['POST'])
 def send_completed_nda_email():
-    """Send email notification for completed NDA"""
+    """Send completion email with attached NDA PDF."""
     try:
-        data = request.get_json()
+        data = request.get_json() or {}
         form_id = data.get('formId')
-        
-        if not form_id:
-            return jsonify({'success': False, 'message': 'Form ID is required'}), 400
-        
-        query = "SELECT * FROM vendors WHERE id = %s"
-        vendor = execute_query(query, (form_id,), fetch_one=True)
-        
+        reference_number = data.get('reference_number')
+
+        vendor = None
+        if form_id:
+            vendor = execute_query("SELECT * FROM vendors WHERE id = %s", (form_id,), fetch_one=True)
+        elif reference_number:
+            vendor = execute_query("SELECT * FROM vendors WHERE reference_number = %s", (reference_number,), fetch_one=True)
+        else:
+            return jsonify({'success': False, 'message': 'Form ID or reference_number is required'}), 400
         if not vendor:
             return jsonify({'success': False, 'message': 'Vendor not found'}), 404
+
+        # Try to fetch nda_forms row for richer data
+        form_json = {}
+        if vendor and vendor.get('reference_number'):
+            try:
+                nf = execute_query(
+                    """
+                    SELECT form_data FROM nda_forms
+                    WHERE JSON_UNQUOTE(JSON_EXTRACT(form_data, '$.reference_number')) = %s
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (vendor['reference_number'],), fetch_one=True
+                )
+                if nf and nf.get('form_data'):
+                    form_json = json.loads(nf['form_data']) if isinstance(nf['form_data'], str) else nf['form_data']
+            except Exception as _e:
+                print(f"Failed to fetch nda_forms row: {_e}")
+
+        # Build NDA PDF in-memory
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Header with reference (left) and email (right)
+        story.append(Paragraph("NON-DISCLOSURE AGREEMENT", styles['Title']))
+        story.append(Spacer(1, 6))
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        left = Paragraph(f"Reference Number: {vendor.get('reference_number') or 'N/A'}", ParagraphStyle('left', parent=styles['Normal'], alignment=0))
+        right = Paragraph(f"Vendor Email: {vendor.get('email') or 'N/A'}", ParagraphStyle('right', parent=styles['Normal'], alignment=2))
+        story.append(left)
+        story.append(right)
+        story.append(Spacer(1, 12))
+
+        # No top signature; will render near bottom below
+
+        # NDA body – formatted per requested template
+        story.append(Paragraph("<b>Confidentiality & Nondisclosure Agreement (NDA)</b>", styles['Heading2']))
+        story.append(Spacer(1, 6))
+        today_str = datetime.now().strftime('%d, %B, %Y')
+        intro = (
+            f"This agreement is entered into on {today_str}, by and among:<br/><br/>"
+            f"(1) YellowStone Xperiences Pvt Ltd, a company incorporated and existing under the laws of Company Act, India, having its registered office at Plot # 2, ITC, Fourth Floor, Sector 67, Mohali -160062, Punjab, India, registered with the company registration number U72900PB2020PTC051260, hereinafter referred to as ‘YSXP’, And<br/>"
+            f"(2) {vendor.get('company_name') or '________________'}, a company incorporated and existing under the laws of Company Act, India, having its registered office at {vendor.get('address') or '________________'}, registered with the company registration number {'________________'}, hereinafter referred to as ‘{vendor.get('company_name') or '________'}’.<br/><br/>"
+            "Hereinafter also referred to individually as a ‘Party’ and collectively as the ‘Parties’."
+        )
+        story.append(Paragraph(intro, styles['Normal']))
+        story.append(Spacer(1, 8))
+
+        sections = [
+            ("1. PURPOSE", "In connection with discussions between YellowStone Xperiences Pvt Ltd and the Vendor concerning Company’s local representative under capacity of Strategic Partnership for cross selling of products and services. In order to pursue this Purpose, the Parties recognize that there is a need to disclose certain confidential information by the Disclosing Party to the Receiving Party to be used only for this Purpose and to protect such confidential information from unauthorized use and disclosure. The Disclosing Party has agreed to disclose to the Receiving Party the confidential information on a strictly confidential basis."),
+            ("2. DEFINITION OF CONFIDENTIAL INFORMATION", "‘Confidential Information’ shall mean all information, whether disclosed before or after the Effective Date, that is disclosed in written, oral, electronic, visual or other form by either party (each, as a ‘Disclosing Party’) to the other party (each, as a ‘Receiving Party’) and either (i) marked or designated as ‘confidential’ or ‘proprietary’ at the time of disclosure or (ii) otherwise clearly indicated to be confidential at the time of disclosure. Confidential Information may include, without limitation, computer programs, products, development plans, drawings, models, proposed services, ideas, concepts, processes, research, inventions, trade secrets, formulas, procedures, names and expertise of employees and consultants, and customer or partner information."),
+            ("3. CONFIDENTIALITY OBLIGATION", "Receiving Party agrees to protect the Confidential Information by using the same degree of care as it uses for its own confidential or proprietary information (but not less than a reasonable degree of care), not to divulge Confidential Information to any third party, not to use such Confidential Information except for the Business Purpose, to copy only as reasonably required with appropriate markings, and not to reverse engineer any such Confidential Information. Access shall be limited to those with a need-to-know under obligations no less protective than this Agreement. Required disclosures by law are permitted with prompt notice and limited scope."),
+            ("4. NON-DISCLOSURE OF CONFIDENTIAL INFORMATION", "Receiving Party shall only permit access to Confidential Information to those of its employees or authorized representatives who have a need to know and shall not disclose it to third parties."),
+            ("5. RETURN OF CONFIDENTIAL INFORMATION", "All Confidential Information furnished under this Agreement shall remain the property of the Disclosing Party and shall be returned or destroyed (without retaining copies) promptly upon termination of this Agreement or any breach, with consent of both parties."),
+            ("6. TERM", "This Agreement shall come into force from the effective date of this deed and shall continue for two (2) years from the Effective Date, unless earlier terminated by either Party with 30 days’ prior written notice."),
+            ("7. GOVERNING LAW", "This Agreement shall be governed in all respects in accordance with the laws of Mohali, Punjab, India."),
+            ("8. AMENDMENTS, FILLING, CANCELLATION, TERMINATION AND RENEWAL OF AGREEMENT", "Any term of this Agreement may be amended, filled, cancelled, terminated and renewed under the written mutual consent of the Parties with 30 days’ advance written notice."),
+            ("9. REMEDIES", "For any breach, the injured party shall have the right to equitable remedies including injunctive relief and specific performance, in addition to termination and damages, in Mohali, Punjab, India (or as mutually agreed)."),
+            ("10. VALID NOTICES", "All notices shall be deemed duly given when sent by post, courier, fax or e‑mail to the addresses below."),
+        ]
+        for title, text in sections:
+            story.append(Paragraph(f"<b>{title}</b>", styles['Normal']))
+            story.append(Paragraph(text, styles['Normal']))
+            story.append(Spacer(1, 6))
+
+        notice_info = [
+            ['If to Yellowstone Xperiences Private Limited:', ''],
+            ['Postal address:', 'Plot # 2, ITC, Fourth Floor, Sector 67, Mohali, Punjab, India (160062).'],
+            ['E-mail:', 'hello@yellowstonexps.com, Harpreet.singh@yellowstonexps.com'],
+            [f"If to {vendor.get('company_name') or 'Vendor'}:", ''],
+            ['Postal address:', vendor.get('address') or '________________'],
+            ['Phone:', vendor.get('phone') or '________________'],
+            ['E-mail:', vendor.get('email') or '________________'],
+        ]
+        notice_table = Table(notice_info, colWidths=[2.2*inch, 3.8*inch])
+        notice_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 1, colors.black),
+            ('BACKGROUND', (0,0), (0,-1), colors.lightgrey),
+            ('FONTSIZE', (0,0), (-1,-1), 9)
+        ]))
+        story.append(notice_table)
+        story.append(Spacer(1, 8))
+
+        story.append(Paragraph('<b>11. DISPUTE SETTLEMENT</b>', body))
+        story.append(Paragraph('If any dispute arises relating to non‑disclosure of confidential information, the parties shall perform by negotiation at first. If unresolved, the injured party may sue for compensation in the court.', body))
+        story.append(Spacer(1, 8))
+
+        story.append(Paragraph('IN WITNESS WHEREOF, the parties have executed this Agreement on the date first written above by their fully authorized representatives with their free consent.', styles['Normal']))
+        story.append(Spacer(1, 8))
+
+        sig_lines = [
+            ['For YSXP:', 'For Vendor:'],
+            ['Signature:', 'Signature:'],
+            ['Name:', vendor.get('contact_person') or ''],
+            ['Title:', ''],
+            ['Date:', today_str],
+        ]
+        sig_table = Table(sig_lines, colWidths=[3*inch, 3*inch])
+        sig_table.setStyle(TableStyle([
+            ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+            ('FONTSIZE', (0,0), (-1,-1), 9)
+        ]))
+        story.append(sig_table)
         
-        # Send completion email
+        # Helper to clean base64 strings
+        def _clean_b64(b64s):
+            if not b64s:
+                return None
+            s = b64s
+            if isinstance(s, bytes):
+                s = s.decode('utf-8', errors='ignore')
+            if ',' in s and s.strip().startswith('data:'):
+                s = s.split(',', 1)[1]
+            missing = len(s) % 4
+            if missing:
+                s += '=' * (4 - missing)
+            return s
+
+        # Signatures block as two-column table; vendor signature in the right column
         try:
-            msg = MIMEMultipart()
-            msg['From'] = SMTP_USERNAME
-            msg['To'] = vendor['email']
-            msg['Subject'] = f"NDA Completion Confirmation - {vendor['company_name']}"
-            
-            body = f"""
-Dear {vendor['contact_person']},
+            sig_b64 = _clean_b64(form_json.get('signature_data') or vendor.get('signature_data'))
+            sig_img_el = ''
+            if sig_b64:
+                import base64
+                sig_bytes = base64.b64decode(sig_b64)
+                sig_io = BytesIO(sig_bytes)
+                sig_img_el = Image(sig_io, width=2.5*inch, height=0.9*inch)
 
-Your NDA has been successfully completed and processed.
+            story.append(Paragraph('Signatures', styles['Heading2']))
+            story.append(Spacer(1, 6))
+            sig_table = Table([
+                ['For YSXP:', 'For Vendor:'],
+                ['Signature:', sig_img_el if sig_img_el else 'Signature: _____________________________'],
+                ['Name:', vendor.get('contact_person') or ''],
+                ['Title:', ''],
+                ['Date:', datetime.now().strftime('%Y-%m-%d')],
+            ], colWidths=[3*inch, 3*inch])
+            sig_table.setStyle(TableStyle([
+                ('GRID', (0,0), (-1,-1), 0.5, colors.grey),
+                ('FONTSIZE', (0,0), (-1,-1), 9),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE')
+            ]))
+            story.append(sig_table)
+            story.append(Spacer(1, 8))
+        except Exception as _img_err:
+            print(f"Signature render error: {_img_err}")
 
-Company: {vendor['company_name']}
-Reference Number: {vendor['reference_number']}
-Completion Date: {vendor['signed_date']}
+        # Company details in simple lines (no table)
+        info_style = ParagraphStyle('info', parent=styles['Normal'], fontSize=10, leading=13)
+        story.append(Paragraph(f"Company Name: {vendor.get('company_name') or 'N/A'}", info_style))
+        story.append(Paragraph(f"Contact Person: {vendor.get('contact_person') or 'N/A'}", info_style))
+        story.append(Paragraph(f"Phone: {vendor.get('phone') or 'N/A'}", info_style))
+        story.append(Paragraph(f"Address: {vendor.get('address') or 'N/A'}", info_style))
 
-Thank you for your cooperation.
+        # Footer timestamp right-aligned
+        story.append(Spacer(1, 6))
+        story.append(Paragraph(f"Timestamp: {ts}", ParagraphStyle('footer_ts', parent=styles['Normal'], alignment=2)))
 
-Best regards,
-YellowStone Xperiences Team
-            """
-            
-            msg.attach(MIMEText(body, 'plain'))
-            
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-            server.starttls()
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-            text = msg.as_string()
-            server.sendmail(SMTP_USERNAME, vendor['email'], text)
+        doc.build(story)
+        buffer.seek(0)
+
+        # Prepare email with attachment using configured SMTP
+        smtp = get_smtp_settings()
+        if not vendor.get('email'):
+            return jsonify({'success': False, 'message': 'Vendor email is missing'}), 400
+        msg = MIMEMultipart()
+        msg['From'] = f"YellowStone XPs <{smtp['smtp_username']}>"
+        msg['To'] = vendor['email']
+        # Send a copy to the sender for verification
+        msg['Bcc'] = smtp['smtp_username']
+        # Add anti-spam headers used elsewhere in the app
+        try:
+            add_anti_spam_headers(msg, smtp)
+        except Exception:
+            pass
+        msg['Subject'] = f"Completed NDA - {vendor['company_name']} (Ref: {vendor['reference_number']})"
+
+        body = f"""Dear {vendor.get('contact_person') or 'Vendor'},
+
+Please find attached the completed NDA PDF containing your submitted details.
+
+Reference Number: {vendor.get('reference_number')}
+Timestamp: {ts}
+
+Regards,
+YellowStone Xperiences Pvt Ltd
+"""
+        msg.attach(MIMEText(body, 'plain'))
+
+        from email.mime.application import MIMEApplication
+        attachment = MIMEApplication(buffer.read(), _subtype='pdf')
+        attachment.add_header('Content-Disposition', 'attachment', filename=f"NDA_{vendor.get('reference_number')}.pdf")
+        msg.attach(attachment)
+
+        try:
+            recipients = [vendor['email']]
+            if smtp.get('smtp_username'):
+                recipients.append(smtp['smtp_username'])
+            if smtp['smtp_port'] == 465:
+                server = smtplib.SMTP_SSL(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+            else:
+                server = smtplib.SMTP(smtp['smtp_server'], smtp['smtp_port'], timeout=30)
+                server.starttls()
+            server.login(smtp['smtp_username'], smtp['smtp_password'])
+            try:
+                server.set_debuglevel(1)
+            except Exception:
+                pass
+            result = server.sendmail(smtp['smtp_username'], recipients, msg.as_string())
             server.quit()
-            
-            return jsonify({'success': True, 'message': 'Completion email sent successfully'})
-            
-        except Exception as email_error:
-            print(f"Email sending failed: {email_error}")
-            return jsonify({'success': False, 'message': 'Failed to send email'}), 500
-        
+            if result:
+                # result is a dict of {recipient: error}
+                return jsonify({'success': False, 'message': f'Unsent recipients: {result}'}), 500
+        except Exception as mail_err:
+            print(f"Completed NDA email send error: {mail_err}")
+            return jsonify({'success': False, 'message': f'Email send failed: {mail_err}'}), 500
+
+        return jsonify({'success': True, 'message': 'Completion email with PDF sent successfully'})
+
     except Exception as e:
         print(f"Send completed NDA email error: {e}")
+        import traceback; traceback.print_exc()
         return jsonify({'success': False, 'message': 'Failed to send email'}), 500
 
 @app.route('/api/admin/send-bulk-nda', methods=['POST'])
@@ -6487,6 +6787,25 @@ def get_admin_employees():
         print(f"âŒ Error getting employees: {e}")
         return jsonify({'error': 'Failed to get employees'}), 500
 
+@app.route('/api/admin/employees/search', methods=['GET'])
+def search_admin_employees():
+    """Lightweight employee search by name (for assigns)."""
+    try:
+        q = (request.args.get('query') or '').strip()
+        limit = int(request.args.get('limit', 20))
+        if not q:
+            return jsonify([])
+        like = f"%{q}%"
+        query = (
+            "SELECT id, name, email FROM users "
+            "WHERE user_type = 'employee' AND name LIKE %s ORDER BY name LIMIT %s"
+        )
+        results = execute_query(query, (like, limit), fetch_all=True) or []
+        return jsonify(results)
+    except Exception as e:
+        print(f"Employee search error: {e}")
+        return jsonify([])
+
 @app.route('/api/admin/employees/<employee_id>/details', methods=['GET'])
 def get_admin_employee_details_by_id(employee_id):
     """Get employee details by employee_id for assignment verification"""
@@ -8030,6 +8349,62 @@ def get_tenders():
                 )
                 """
             )
+            # Ensure extra optional date columns exist
+            try:
+                exists_col = execute_query("""
+                    SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='created_tenders' AND COLUMN_NAME='query_submission_date'
+                """, fetch_one=True) or {'cnt': 0}
+                if int(exists_col.get('cnt', 0)) == 0:
+                    execute_query("ALTER TABLE created_tenders ADD COLUMN query_submission_date DATE NULL AFTER opening_date")
+            except Exception:
+                pass
+            try:
+                exists_col2 = execute_query("""
+                    SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='created_tenders' AND COLUMN_NAME='appendix_ab_submission_date'
+                """, fetch_one=True) or {'cnt': 0}
+                if int(exists_col2.get('cnt', 0)) == 0:
+                    execute_query("ALTER TABLE created_tenders ADD COLUMN appendix_ab_submission_date DATE NULL AFTER query_submission_date")
+            except Exception:
+                pass
+            # Ensure assigned_vendor_id exists for vendor assignment (idempotent)
+            try:
+                col_check = execute_query(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM information_schema.COLUMNS
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'created_tenders'
+                      AND COLUMN_NAME = 'assigned_vendor_id'
+                    """,
+                    fetch_one=True
+                ) or { 'cnt': 0 }
+                if int(col_check.get('cnt', 0)) == 0:
+                    execute_query(
+                        "ALTER TABLE created_tenders ADD COLUMN assigned_vendor_id INT NULL AFTER project_team_ids"
+                    )
+
+                fk_check = execute_query(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM information_schema.KEY_COLUMN_USAGE
+                    WHERE TABLE_SCHEMA = DATABASE()
+                      AND TABLE_NAME = 'created_tenders'
+                      AND COLUMN_NAME = 'assigned_vendor_id'
+                      AND REFERENCED_TABLE_NAME = 'vendors'
+                    """,
+                    fetch_one=True
+                ) or { 'cnt': 0 }
+                if int(fk_check.get('cnt', 0)) == 0:
+                    try:
+                        execute_query(
+                            "ALTER TABLE created_tenders ADD CONSTRAINT fk_created_tenders_vendor FOREIGN KEY (assigned_vendor_id) REFERENCES vendors(id) ON DELETE SET NULL"
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         except Exception as e:
             print(f"Note: created_tenders table may already exist or error creating it: {e}")
 
@@ -8079,12 +8454,16 @@ def get_tenders():
             t.*, 
             u.name as created_by_name,
             u2.name as updated_by_name,
+            ucoor.name as project_coordinator_name,
+            v.company_name as assigned_vendor_name,
             DATEDIFF(t.submission_deadline, CURDATE()) as days_left,
             tu.update_message AS today_update_message,
             tu.employee_name AS today_update_by
         FROM created_tenders t
         LEFT JOIN users u ON t.created_by = u.id
         LEFT JOIN users u2 ON t.updated_by = u2.id
+        LEFT JOIN users ucoor ON t.project_coordinator_id = ucoor.id
+        LEFT JOIN vendors v ON t.assigned_vendor_id = v.id
         LEFT JOIN (
             SELECT 
                 y.tender_id, 
@@ -8133,13 +8512,15 @@ def export_tenders_report():
             t.status,
             t.submission_deadline,
             tu.update_message AS today_update_message,
-            tu.employee_name AS today_update_by
+            tu.employee_name AS today_update_by,
+            tu.updated_at AS today_update_at
         FROM created_tenders t
         LEFT JOIN (
             SELECT 
                 y.tender_id, 
                 y.update_message, 
-                COALESCE(u.name, 'Unknown') AS employee_name
+                COALESCE(u.name, 'Unknown') AS employee_name,
+                y.created_at AS updated_at
             FROM tender_updates y
             INNER JOIN (
                 SELECT tender_id, MAX(id) AS latest_id
@@ -8160,11 +8541,18 @@ def export_tenders_report():
 
         sio = StringIO()
         writer = _csv.writer(sio)
-        writer.writerow(['No.', 'Department', 'Tender Name', 'Tender Number', 'Status', 'Last Date', 'Today Update (Log)', 'Updated By'])
+        writer.writerow(['No.', 'Department', 'Tender Name', 'Tender Number', 'Status', 'Last Date', 'Today Update (Log)', 'Updated By', 'Log Time'])
         for i, r in enumerate(rows, start=1):
             last_date = r.get('submission_deadline')
             if hasattr(last_date, 'strftime'):
                 last_date = last_date.strftime('%Y-%m-%d')
+            log_time = r.get('today_update_at')
+            if hasattr(log_time, 'strftime'):
+                log_time = log_time.strftime('%Y-%m-%d %H:%M:%S')
+            # Fallback: also include the time inline in the log cell for compatibility with older spreadsheets
+            inline_log = r.get('today_update_message') or ''
+            if log_time:
+                inline_log = f"{inline_log} (at {log_time})" if inline_log else f"(at {log_time})"
             writer.writerow([
                 i,
                 r.get('category') or '',
@@ -8172,8 +8560,9 @@ def export_tenders_report():
                 r.get('tender_number') or '',
                 r.get('status') or '',
                 last_date or '',
-                r.get('today_update_message') or '',
-                r.get('today_update_by') or ''
+                inline_log,
+                r.get('today_update_by') or '',
+                log_time or ''
             ])
 
         csv_data = sio.getvalue()
@@ -8311,14 +8700,15 @@ def create_tender():
         data = request.get_json()
         print(f"📝 Creating tender with data: {json.dumps(data, indent=2)}")
         
-        required_fields = ['tender_number', 'title', 'tender_type']
-        for field in required_fields:
-            if not data.get(field):
-                print(f"❌ Missing required field: {field}")
-                return jsonify({'success': False, 'message': f'{field} is required'}), 400
+        # Minimal validation with title fallback from tender_name
+        if not data.get('tender_number'):
+            return jsonify({'success': False, 'message': 'tender_number is required'}), 400
+        effective_title = data.get('title') or data.get('tender_name')
+        if not effective_title:
+            return jsonify({'success': False, 'message': 'tender_name or title is required'}), 400
         
-        # Default status 'tender_submitted' for creation
-        status_value = data.get('status') or 'tender_submitted'
+        # Default status 'new' for creation
+        status_value = data.get('status') or 'new'
         
         # No uniqueness check needed - created_tenders allows duplicates
         
@@ -8405,46 +8795,48 @@ def create_tender():
         INSERT INTO created_tenders (
             tender_number, title, tender_name, short_name, description, tender_type, category,
             organization_name, budget_amount, currency, published_date, rfp_date,
-            submission_deadline, rfq_date, opening_date, status, query_text, contact_person,
+            submission_deadline, rfq_date, opening_date, query_submission_date, appendix_ab_submission_date, status, query_text, contact_person,
             contact_email, contact_phone, location, eligibility_criteria, documents_required,
             important_documents, project_coordinator_id, project_team_ids, created_by
         ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         """
         
         params = (
             data.get('tender_number'),                                    # 1
-            data.get('title'),                                             # 2
+            effective_title,                                              # 2
             clean_value(data.get('tender_name', data.get('title'))),      # 3
             clean_value(data.get('short_name')),                          # 4
             clean_value(data.get('description')),                         # 5
             data.get('tender_type'),                                      # 6
             clean_value(data.get('category')),                            # 7
             clean_value(data.get('organization_name')),                   # 8
-            clean_budget_amount(data.get('budget_amount')),                # 9
+            clean_budget_amount(data.get('budget_amount')),               # 9
             data.get('currency', 'INR'),                                  # 10
-            clean_value(data.get('published_date')),                     # 11
+            clean_value(data.get('published_date')),                      # 11
             clean_value(data.get('rfp_date')),                            # 12
-            clean_value(data.get('submission_deadline')),                # 13
+            clean_value(data.get('submission_deadline')),                 # 13
             clean_value(data.get('rfq_date', data.get('submission_deadline'))), # 14
-            clean_value(data.get('opening_date')),                       # 15
-            status_value,                                                  # 16
-            clean_value(data.get('query', data.get('query_text'))),      # 17
-            clean_value(data.get('contact_person')),                     # 18
-            clean_value(data.get('contact_email')),                      # 19
-            clean_value(data.get('contact_phone')),                      # 20
-            clean_value(data.get('location')),                            # 21
-            clean_value(data.get('eligibility_criteria')),                # 22
-            clean_value(data.get('documents_required')),                  # 23
-            clean_json_value(data.get('important_documents')),           # 24
-            project_coord_id,                                             # 25 (validated)
-            clean_json_value(data.get('project_team_ids')),               # 26
-            created_by_id                                                 # 27 (validated or None)
+            clean_value(data.get('opening_date')),                        # 15
+            clean_value(data.get('query_submission_date')),               # 16
+            clean_value(data.get('appendix_ab_submission_date')),         # 17
+            status_value,                                                 # 18
+            clean_value(data.get('query', data.get('query_text'))),       # 19
+            clean_value(data.get('contact_person')),                      # 20
+            clean_value(data.get('contact_email')),                       # 21
+            clean_value(data.get('contact_phone')),                       # 22
+            clean_value(data.get('location')),                            # 23
+            clean_value(data.get('eligibility_criteria')),                # 24
+            clean_value(data.get('documents_required')),                  # 25
+            clean_json_value(data.get('important_documents')),            # 26
+            project_coord_id,                                             # 27 (validated)
+            clean_json_value(data.get('project_team_ids')),               # 28
+            created_by_id                                                 # 29 (validated or None)
         )
         
-        # Verify parameter count matches placeholders (27 expected)
-        expected_params = 27
+        # Verify parameter count matches placeholders (29 expected)
+        expected_params = 29
         actual_params = len(params)
         if actual_params != expected_params:
             print(f"❌ Parameter count mismatch! Expected {expected_params}, got {actual_params}")
@@ -8519,6 +8911,7 @@ def update_tender(tender_id):
         SET title = %s, tender_name = %s, short_name = %s, description = %s, tender_type = %s, category = %s,
             organization_name = %s, budget_amount = %s, currency = %s,
             published_date = %s, rfp_date = %s, submission_deadline = %s, rfq_date = %s, opening_date = %s,
+            query_submission_date = %s, appendix_ab_submission_date = %s,
             status = %s, query_text = %s, contact_person = %s, contact_email = %s,
             contact_phone = %s, location = %s, eligibility_criteria = %s,
             documents_required = %s, important_documents = %s,
@@ -8527,7 +8920,7 @@ def update_tender(tender_id):
         """
         
         params = (
-            data.get('title'),
+            (data.get('title') or data.get('tender_name')),
             data.get('tender_name', data.get('title')),
             data.get('short_name', ''),
             data.get('description', ''),
@@ -8541,6 +8934,8 @@ def update_tender(tender_id):
             data.get('submission_deadline'),
             data.get('rfq_date', data.get('submission_deadline')),
             data.get('opening_date'),
+            data.get('query_submission_date'),
+            data.get('appendix_ab_submission_date'),
             data.get('status'),
             data.get('query', data.get('query_text', '')),
             data.get('contact_person', ''),
@@ -8574,6 +8969,108 @@ def delete_tender(tender_id):
     except Exception as e:
         print(f"Error deleting tender: {e}")
         return jsonify({'success': False, 'message': 'Failed to delete tender'}), 500
+
+@app.route('/api/admin/tenders/<int:tender_id>/extensions', methods=['GET', 'POST', 'OPTIONS'])
+def manage_tender_extensions(tender_id):
+    """Create and list tender date extensions. If a date field is extended, update the tender record too."""
+    try:
+        # Ensure log table exists
+        try:
+            execute_query(
+                """
+                CREATE TABLE IF NOT EXISTS tender_extensions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tender_id INT NOT NULL,
+                    date_field VARCHAR(50) NOT NULL,
+                    old_date DATE NULL,
+                    new_date DATE NULL,
+                    reason TEXT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (tender_id) REFERENCES created_tenders(id) ON DELETE CASCADE
+                )
+                """
+            )
+        except Exception:
+            pass
+
+        # CORS preflight
+        if request.method == 'OPTIONS':
+            return make_response(('', 204))
+
+        if request.method == 'GET':
+            rows = execute_query(
+                "SELECT id, date_field, old_date, new_date, reason, created_at FROM tender_extensions WHERE tender_id = %s ORDER BY created_at DESC",
+                (tender_id,), fetch_all=True
+            ) or []
+            return jsonify(rows)
+
+        data = request.get_json() or {}
+        date_field = (data.get('date_field') or '').strip()
+        new_date = data.get('new_date')
+        reason = data.get('reason', '')
+
+        allowed_fields = {
+            'published_date', 'query_submission_date', 'appendix_ab_submission_date',
+            'rfp_date', 'submission_deadline', 'rfq_date', 'opening_date'
+        }
+        if date_field not in allowed_fields:
+            return jsonify({'success': False, 'message': 'Invalid date field'}), 400
+        if not new_date:
+            return jsonify({'success': False, 'message': 'new_date is required'}), 400
+
+        # Fetch old value
+        old = execute_query(f"SELECT {date_field} AS d FROM created_tenders WHERE id = %s", (tender_id,), fetch_one=True)
+        old_date = old.get('d') if old else None
+
+        # Update tender date
+        execute_query(f"UPDATE created_tenders SET {date_field} = %s WHERE id = %s", (new_date, tender_id))
+
+        # Insert log
+        execute_query(
+            "INSERT INTO tender_extensions (tender_id, date_field, old_date, new_date, reason) VALUES (%s, %s, %s, %s, %s)",
+            (tender_id, date_field, old_date, new_date, reason)
+        )
+
+        # Broadcast change for admin views
+        try:
+            socketio.emit('database_change', {'table': 'tenders', 'action': 'update', 'id': tender_id}, room='admin')
+        except:
+            pass
+
+        return jsonify({'success': True, 'message': 'Extension logged and date updated'})
+    except Exception as e:
+        print(f"Extensions endpoint error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to process extension'}), 500
+
+@app.route('/api/admin/tenders/<int:tender_id>/assign-vendor', methods=['POST', 'OPTIONS'])
+def assign_vendor_to_tender(tender_id):
+    """Assign a vendor to a tender (stores vendor id on created_tenders)."""
+    try:
+        # Handle CORS preflight
+        if request.method == 'OPTIONS':
+            return make_response(('', 204))
+        data = request.get_json() or {}
+        vendor_id = data.get('vendor_id')
+        if not vendor_id:
+            return jsonify({'success': False, 'message': 'vendor_id is required'}), 400
+
+        # Verify vendor exists
+        vendor = execute_query("SELECT id FROM vendors WHERE id = %s", (vendor_id,), fetch_one=True)
+        if not vendor:
+            return jsonify({'success': False, 'message': 'Vendor not found'}), 404
+
+        # Column expected to exist; avoid noisy ALTER attempts in this endpoint
+
+        # Perform assignment
+        update_query = "UPDATE created_tenders SET assigned_vendor_id = %s, updated_at = NOW() WHERE id = %s"
+        execute_query(update_query, (vendor_id, tender_id))
+
+        # Optional: return vendor details for UI
+        details = execute_query("SELECT id, assigned_vendor_id FROM created_tenders WHERE id = %s", (tender_id,), fetch_one=True)
+        return jsonify({'success': True, 'message': 'Vendor assigned successfully', 'tender': details})
+    except Exception as e:
+        print(f"Error assigning vendor to tender: {e}")
+        return jsonify({'success': False, 'message': 'Failed to assign vendor'}), 500
 
 # Start the background email scheduler
 email_scheduler_thread = threading.Thread(target=check_and_send_scheduled_emails, daemon=True)

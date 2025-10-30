@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Briefcase, Plus, Edit, Trash2, Calendar, User, AlertCircle, 
-  Clock, Filter, Search, X, Save, ArrowUp, ArrowDown, ArrowRight, DollarSign
+  Clock, Filter, Search, X, Save, ArrowUp, ArrowDown, ArrowRight, DollarSign,
+  UserCheck
 } from 'lucide-react';
 import { apiCall } from '../utils/api';
 
@@ -18,6 +19,9 @@ const ProjectsView = ({ showNotification }) => {
   const [assignedToFilter, setAssignedToFilter] = useState('all');
   const [projectUpdates, setProjectUpdates] = useState([]);
   const [showUpdates, setShowUpdates] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [assignProjectId, setAssignProjectId] = useState('');
+  const [assignVendorId, setAssignVendorId] = useState('');
 
   const [projectForm, setProjectForm] = useState({
     name: '',
@@ -115,6 +119,48 @@ const ProjectsView = ({ showNotification }) => {
       showNotification('Failed to load data', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAssignVendor = async () => {
+    if (!assignProjectId || !assignVendorId) {
+      showNotification('Please select both project and vendor', 'error');
+      return;
+    }
+    try {
+      const project = projects.find(p => p.id === Number(assignProjectId));
+      const fmtDate = (d) => {
+        if (!d) return null;
+        try {
+          const iso = new Date(d).toISOString();
+          return iso.slice(0, 10);
+        } catch (e) {
+          return typeof d === 'string' && d.length >= 10 ? d.slice(0, 10) : null;
+        }
+      };
+      const body = {
+        name: project?.name || '',
+        description: project?.description || '',
+        status: project?.status || 'planning',
+        priority: project?.priority || 'medium',
+        assigned_to_type: 'vendor',
+        assigned_to_id: Number(assignVendorId),
+        start_date: fmtDate(project?.start_date),
+        end_date: fmtDate(project?.end_date),
+        budget: project?.budget || '',
+        salary_code: project?.salary_code || ''
+      };
+      await apiCall(`/api/admin/projects/${assignProjectId}`, {
+        method: 'PUT',
+        body: JSON.stringify(body)
+      });
+      showNotification('Assigned vendor to project', 'success');
+      setShowAssignModal(false);
+      setAssignProjectId('');
+      setAssignVendorId('');
+      loadData();
+    } catch (e) {
+      showNotification('Failed to assign vendor to project', 'error');
     }
   };
 
@@ -249,6 +295,13 @@ const ProjectsView = ({ showNotification }) => {
           <p className="text-gray-600 mt-1">Manage and track all projects across the organization</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowAssignModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <UserCheck size={18} />
+            Assign to Vendor
+          </button>
           <button
             onClick={() => setShowUpdates(!showUpdates)}
             className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
@@ -819,6 +872,66 @@ const ProjectsView = ({ showNotification }) => {
                   Update Project
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign to Vendor Modal */}
+      {showAssignModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-xl">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Assign Project to Vendor</h3>
+              <button onClick={() => setShowAssignModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Project</label>
+                <select
+                  value={assignProjectId}
+                  onChange={(e) => setAssignProjectId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">-- Choose Project --</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Vendor</label>
+                <select
+                  value={assignVendorId}
+                  onChange={(e) => setAssignVendorId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="">-- Choose Vendor --</option>
+                  {vendors.filter(v => v && v.id !== 'metadata').map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.company_name} {v.contact_person ? `- ${v.contact_person}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="p-6 bg-gray-50 flex justify-end gap-3 rounded-b-xl">
+              <button
+                onClick={() => setShowAssignModal(false)}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAssignVendor}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Assign
+              </button>
             </div>
           </div>
         </div>

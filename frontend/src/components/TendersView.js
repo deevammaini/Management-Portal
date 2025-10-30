@@ -2,13 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { 
   Plus, Building, Search, Filter, X, Edit, Trash2, Eye,
   Calendar, DollarSign, FileText, MapPin, Mail, Phone, 
-  AlertCircle, CheckCircle, Clock, Award, Ban, FileIcon, Download
+  AlertCircle, CheckCircle, Clock, Award, Ban, FileIcon, Download,
+  UserCheck
 } from 'lucide-react';
 import { apiCall, API_BASE } from '../utils/api';
 
 const TendersView = ({ showNotification }) => {
   const [tenders, setTenders] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [vendors, setVendors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
@@ -16,12 +18,24 @@ const TendersView = ({ showNotification }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [assignTenderId, setAssignTenderId] = useState('');
+  const [assignVendorId, setAssignVendorId] = useState('');
+  const [assignmentType, setAssignmentType] = useState('inhouse'); // inhouse | outsourced
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [progressTender, setProgressTender] = useState(null);
   const [selectedTender, setSelectedTender] = useState(null);
+  const [showExtensionModal, setShowExtensionModal] = useState(false);
+  const [extensionLogs, setExtensionLogs] = useState([]);
+  const [extensionForm, setExtensionForm] = useState({ date_field: 'submission_deadline', new_date: '', reason: '' });
+  const [coordinatorSearch, setCoordinatorSearch] = useState('');
+  const [teamSearch, setTeamSearch] = useState('');
+  const [coordinatorResults, setCoordinatorResults] = useState([]);
+  const [teamResults, setTeamResults] = useState([]);
   const [tenderForm, setTenderForm] = useState({
     tender_number: '',
     tender_name: '',
     short_name: '',
-    title: '',
     description: '',
     tender_type: 'government',
     category: '',
@@ -29,6 +43,8 @@ const TendersView = ({ showNotification }) => {
     budget_amount: '',
     currency: 'INR',
     published_date: '',
+    query_submission_date: '',
+    appendix_ab_submission_date: '',
     rfp_date: '',
     submission_deadline: '',
     rfq_date: '',
@@ -56,12 +72,14 @@ const TendersView = ({ showNotification }) => {
       const url = typeFilter === 'all' 
         ? '/api/admin/tenders' 
         : `/api/admin/tenders?type=${typeFilter}`;
-      const [data, employeesData] = await Promise.all([
+      const [data, employeesData, vendorsData] = await Promise.all([
         apiCall(url),
-        apiCall('/api/admin/employees')
+        apiCall('/api/admin/employees'),
+        apiCall('/api/admin/vendors')
       ]);
       setTenders(data || []);
       setEmployees(employeesData || []);
+      setVendors((vendorsData || []).filter(v => v && v.id !== 'metadata'));
     } catch (error) {
       console.error('Error loading tenders:', error);
       showNotification('Failed to load tenders', 'error');
@@ -84,14 +102,16 @@ const TendersView = ({ showNotification }) => {
 
   const handleCreateTender = async () => {
     try {
-      if (!tenderForm.tender_number || !tenderForm.title) {
-        showNotification('Tender number and title are required', 'error');
+      if (!tenderForm.tender_number || !tenderForm.tender_name) {
+        showNotification('Tender number and tender name are required', 'error');
         return;
       }
 
+      const payload = { ...tenderForm, title: tenderForm.tender_name, status: 'new' };
+
       await apiCall('/api/admin/tenders', {
         method: 'POST',
-        body: JSON.stringify(tenderForm)
+        body: JSON.stringify(payload)
       });
 
       showNotification('Tender created successfully', 'success');
@@ -146,12 +166,45 @@ const TendersView = ({ showNotification }) => {
     }
   };
 
+  const handleAssignVendor = async () => {
+    if (!assignTenderId) {
+      showNotification('Please select a tender', 'error');
+      return;
+    }
+    if (assignmentType === 'inhouse') {
+      // No vendor assignment needed
+      showNotification('Marked as In-house; no vendor assignment applied', 'success');
+      setShowAssignModal(false);
+      setAssignTenderId('');
+      setAssignVendorId('');
+      setAssignmentType('inhouse');
+      return;
+    }
+    if (!assignVendorId) {
+      showNotification('Please select a vendor for Outsourced assignment', 'error');
+      return;
+    }
+    try {
+      await apiCall(`/api/admin/tenders/${assignTenderId}/assign-vendor`, {
+        method: 'POST',
+        body: JSON.stringify({ vendor_id: assignVendorId })
+      });
+      showNotification('Assigned vendor to tender', 'success');
+      setShowAssignModal(false);
+      setAssignTenderId('');
+      setAssignVendorId('');
+      setAssignmentType('inhouse');
+      loadTenders();
+    } catch (e) {
+      showNotification('Failed to assign vendor', 'error');
+    }
+  };
+
   const resetForm = () => {
     setTenderForm({
       tender_number: '',
       tender_name: '',
       short_name: '',
-      title: '',
       description: '',
       tender_type: 'government',
       category: '',
@@ -159,6 +212,8 @@ const TendersView = ({ showNotification }) => {
       budget_amount: '',
       currency: 'INR',
       published_date: '',
+      query_submission_date: '',
+      appendix_ab_submission_date: '',
       rfp_date: '',
       submission_deadline: '',
       rfq_date: '',
@@ -189,6 +244,31 @@ const TendersView = ({ showNotification }) => {
     setSelectedTender(tender);
     setShowDetailModal(true);
   };
+
+  const openExtensionModal = async (tender) => {
+    setSelectedTender(tender);
+    setExtensionForm({ date_field: 'submission_deadline', new_date: '', reason: '' });
+    try {
+      const logs = await apiCall(`/api/admin/tenders/${tender.id}/extensions`);
+      setExtensionLogs(Array.isArray(logs) ? logs : []);
+    } catch {
+      setExtensionLogs([]);
+    }
+    setShowExtensionModal(true);
+  };
+
+  const submitExtension = async () => {
+    if (!selectedTender) return;
+    if (!extensionForm.new_date) { showNotification('Select new date', 'error'); return; }
+    try {
+      await apiCall(`/api/admin/tenders/${selectedTender.id}/extensions`, { method: 'POST', body: JSON.stringify(extensionForm) });
+      showNotification('Extension saved', 'success');
+      setShowExtensionModal(false);
+      await loadTenders();
+    } catch (e) {
+      showNotification('Failed to save extension', 'error');
+    }
+  }
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -259,6 +339,78 @@ const TendersView = ({ showNotification }) => {
     }).format(amount);
   };
 
+  const steps = [
+    'New Tender',
+    'Assigned to Vendor',
+    'Under Discussion',
+    'Documents received from Vendor',
+    'Tender Submitted',
+    'Awarded or Lost'
+  ];
+
+  const computeStageIndex = (tender) => {
+    // 1-based index
+    if (!tender) return 1;
+    if (tender.status === 'awarded' || tender.status === 'lost' || tender.status === 'rejected_awarded_to_other_company') return 6;
+    if (tender.status === 'tender_submitted') return 5;
+    // Heuristics for stages 3-4 based on update logs
+    if (tender.status === 'queries_submitted' || tender.status === 'need_extension_on_tender') return 3;
+    if (tender.status === 'appendix_ab_submitted') return 4;
+    if (tender.assigned_vendor_id) return 2;
+    return 1;
+  };
+
+  const computeProgressPercent = (idx) => {
+    const total = steps.length;
+    const clamped = Math.max(1, Math.min(idx, total));
+    return Math.round(((clamped - 1) / (total - 1)) * 100);
+  };
+
+  const getStepClass = (i, currentIdx) => {
+    if (i < currentIdx) return 'bg-green-500 border-green-500 text-white';
+    if (i === currentIdx) return 'bg-blue-600 border-blue-600 text-white';
+    return 'bg-gray-100 border-gray-300 text-gray-500';
+  };
+
+  const openProgressModal = (tender) => {
+    setProgressTender(tender);
+    setShowProgressModal(true);
+  };
+
+  // Debounced search helpers
+  useEffect(() => {
+    const controller = new AbortController();
+    const id = setTimeout(async () => {
+      if (!coordinatorSearch) { setCoordinatorResults([]); return; }
+      try {
+        let res = await apiCall(`/api/admin/employees/search?query=${encodeURIComponent(coordinatorSearch)}&limit=10`).catch(() => null);
+        if (!Array.isArray(res)) {
+          // Fallback: client-side filter on full list if search endpoint not available
+          const all = await apiCall('/api/admin/employees');
+          res = (all || []).filter(emp => (emp.name || '').toLowerCase().includes(coordinatorSearch.toLowerCase())).slice(0, 10);
+        }
+        setCoordinatorResults(res || []);
+      } catch (e) { setCoordinatorResults([]); }
+    }, 250);
+    return () => { clearTimeout(id); controller.abort(); };
+  }, [coordinatorSearch]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const id = setTimeout(async () => {
+      if (!teamSearch) { setTeamResults([]); return; }
+      try {
+        let res = await apiCall(`/api/admin/employees/search?query=${encodeURIComponent(teamSearch)}&limit=20`).catch(() => null);
+        if (!Array.isArray(res)) {
+          const all = await apiCall('/api/admin/employees');
+          res = (all || []).filter(emp => (emp.name || '').toLowerCase().includes(teamSearch.toLowerCase())).slice(0, 50);
+        }
+        setTeamResults(res || []);
+      } catch (e) { setTeamResults([]); }
+    }, 250);
+    return () => { clearTimeout(id); controller.abort(); };
+  }, [teamSearch]);
+
   const filteredTenders = tenders.filter(tender => {
     const matchesSearch = tender.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          tender.tender_number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -284,6 +436,13 @@ const TendersView = ({ showNotification }) => {
           <p className="text-gray-600">Manage government and private tenders</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowAssignModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <UserCheck size={20} />
+            Assign to Vendor
+          </button>
           <button
             onClick={handleExport}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors"
@@ -398,22 +557,47 @@ const TendersView = ({ showNotification }) => {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">No.</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tender Name</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tender Number</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Assignment</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last Date</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Today Update (Log)</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Updated By</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Extensions</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredTenders.map((tender, idx) => (
                 <tr key={tender.id} className="hover:bg-gray-50">
                   <td className="px-6 py-4 text-sm text-gray-900">{idx + 1}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    <button
+                      onClick={() => openProgressModal(tender)}
+                      className="p-1.5 rounded-md border border-gray-300 hover:bg-gray-100"
+                      title="View Progress"
+                    >
+                      <Eye size={16} />
+                    </button>
+                  </td>
                   <td className="px-6 py-4 text-sm text-gray-900">{tender.category || '-'}</td>
                   <td className="px-6 py-4 text-sm text-gray-900">{tender.tender_name || tender.title}</td>
                   <td className="px-6 py-4 text-sm text-gray-900">{tender.tender_number}</td>
+                  <td className="px-6 py-4 text-sm text-gray-900">
+                    {tender.assigned_vendor_id ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                        Outsourced - {tender.assigned_vendor_name || 'Vendor'}
+                      </span>
+                    ) : tender.project_coordinator_id ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full bg-sky-100 text-sky-800 border border-sky-200">
+                        In-house - {tender.project_coordinator_name || 'Employee'}
+                      </span>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
                   <td className="px-6 py-4">
                     <span className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(tender.status)}`}>
                       {getStatusIcon(tender.status)}
@@ -428,6 +612,9 @@ const TendersView = ({ showNotification }) => {
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-900">
                     {tender.today_update_by || '-'}
+                  </td>
+                  <td className="px-6 py-4 text-sm">
+                    <button onClick={() => openExtensionModal(tender)} className="px-3 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700">Extensions</button>
                   </td>
                 </tr>
               ))}
@@ -469,10 +656,10 @@ const TendersView = ({ showNotification }) => {
               </button>
             </div>
             
-            <div className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* Column 1 */}
-                <div className="space-y-4">
+            <div className="p-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {/* Column 1 (left) */}
+                <div className="space-y-2">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Tender Number *
@@ -506,18 +693,6 @@ const TendersView = ({ showNotification }) => {
                   
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Title *
-                    </label>
-                    <input
-                      type="text"
-                      value={tenderForm.title}
-                      onChange={(e) => setTenderForm({...tenderForm, title: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
                       Tender Type *
                     </label>
                     <select
@@ -532,7 +707,7 @@ const TendersView = ({ showNotification }) => {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Category
+                      Tender Category
                     </label>
                     <input
                       type="text"
@@ -545,7 +720,7 @@ const TendersView = ({ showNotification }) => {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Organization Name
+                      Organization Name / Govt Dept
                     </label>
                     <input
                       type="text"
@@ -555,98 +730,11 @@ const TendersView = ({ showNotification }) => {
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Budget Amount
-                    </label>
-                    <div className="flex gap-2">
-                      <select
-                        value={tenderForm.currency}
-                        onChange={(e) => setTenderForm({...tenderForm, currency: e.target.value})}
-                        className="w-24 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                      >
-                        <option value="INR">INR</option>
-                        <option value="USD">USD</option>
-                        <option value="EUR">EUR</option>
-                      </select>
-                      <input
-                        type="number"
-                        value={tenderForm.budget_amount}
-                        onChange={(e) => setTenderForm({...tenderForm, budget_amount: e.target.value})}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Status *
-                    </label>
-                    <select
-                      value={tenderForm.status}
-                      onChange={(e) => setTenderForm({...tenderForm, status: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    >
-                      <option value="tender_submitted">Tender Submitted</option>
-                      <option value="skipped">Skipped</option>
-                      <option value="lost">Lost</option>
-                      <option value="awarded">Awarded</option>
-                      <option value="working_on_it">Working on it</option>
-                      <option value="rejected_awarded_to_other_company">Rejected / Awarded to other company</option>
-                      <option value="need_extension_on_tender">Need Extension on Tender</option>
-                      <option value="queries_submitted">Queries Submitted</option>
-                      <option value="appendix_ab_submitted">Appendix A/B Submitted</option>
-                    </select>
-                  </div>
+                  {/* Budget Amount and Status moved to left column */}
                 </div>
 
-                {/* Column 2 */}
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Published Date
-                    </label>
-                    <input
-                      type="date"
-                      value={tenderForm.published_date}
-                      onChange={(e) => setTenderForm({...tenderForm, published_date: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">RFP Date</label>
-                    <input
-                      type="date"
-                      value={tenderForm.rfp_date}
-                      onChange={(e) => setTenderForm({...tenderForm, rfp_date: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Submission Deadline *
-                    </label>
-                    <input
-                      type="date"
-                      value={tenderForm.submission_deadline}
-                      onChange={(e) => setTenderForm({...tenderForm, submission_deadline: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">RFQ Date</label>
-                    <input
-                      type="date"
-                      value={tenderForm.rfq_date}
-                      onChange={(e) => setTenderForm({...tenderForm, rfq_date: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    />
-                  </div>
-
+                {/* Column 2 (right) */}
+                <div className="space-y-2">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Opening Date
@@ -655,118 +743,167 @@ const TendersView = ({ showNotification }) => {
                       type="date"
                       value={tenderForm.opening_date}
                       onChange={(e) => setTenderForm({...tenderForm, opening_date: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
                     />
                   </div>
 
+                  {/* All date fields grouped here */}
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Location
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Published Date</label>
+                    <input
+                      type="date"
+                      value={tenderForm.published_date}
+                      onChange={(e) => setTenderForm({...tenderForm, published_date: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Query Submission Date</label>
+                    <input
+                      type="date"
+                      value={tenderForm.query_submission_date}
+                      onChange={(e) => setTenderForm({...tenderForm, query_submission_date: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Appendix A/B Submission Date</label>
+                    <input
+                      type="date"
+                      value={tenderForm.appendix_ab_submission_date}
+                      onChange={(e) => setTenderForm({...tenderForm, appendix_ab_submission_date: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">RFP Date</label>
+                    <input
+                      type="date"
+                      value={tenderForm.rfp_date}
+                      onChange={(e) => setTenderForm({...tenderForm, rfp_date: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Submission Deadline *</label>
+                    <input
+                      type="date"
+                      value={tenderForm.submission_deadline}
+                      onChange={(e) => setTenderForm({...tenderForm, submission_deadline: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">RFQ Date</label>
+                    <input
+                      type="date"
+                      value={tenderForm.rfq_date}
+                      onChange={(e) => setTenderForm({...tenderForm, rfq_date: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
+                    />
+                  </div>
+
+                  {/* Non-date fields below */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Location</label>
                     <input
                       type="text"
                       value={tenderForm.location}
                       onChange={(e) => setTenderForm({...tenderForm, location: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
                       placeholder="City, State"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Contact Person
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Contact Person</label>
                     <input
                       type="text"
                       value={tenderForm.contact_person}
                       onChange={(e) => setTenderForm({...tenderForm, contact_person: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Contact Email
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Contact Email</label>
                     <input
                       type="email"
                       value={tenderForm.contact_email}
-                      onChange={(e) => setTenderForm({...tenderForm, contact_email: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                      onChange={(e) => setTenderForm({ ...tenderForm, contact_email: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
                     />
                   </div>
-
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Contact Phone
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Contact Phone</label>
                     <input
                       type="text"
                       value={tenderForm.contact_phone}
-                      onChange={(e) => setTenderForm({...tenderForm, contact_phone: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                      onChange={(e) => setTenderForm({ ...tenderForm, contact_phone: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Query</label>
-                    <input
-                      type="text"
-                      value={tenderForm.query}
-                      onChange={(e) => setTenderForm({...tenderForm, query: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Full Width Fields */}
-              <div className="mt-4 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
+                  {/* Row: Project Coordinator (left) and Project Team (right) */}
+                  <div className="relative">
                     <label className="block text-sm font-medium text-gray-700 mb-1">Project Coordinator *</label>
                     <input
                       type="text"
-                      value={tenderForm.coordinator_salary_code}
-                      onChange={(e) => {
-                        const code = String(e.target.value || '').trim();
-                        const emp = resolveEmployeeByCode(code);
-                        setTenderForm({
-                          ...tenderForm,
-                          coordinator_salary_code: code,
-                          project_coordinator_id: emp ? emp.id : ''
-                        });
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                      placeholder="Salary Code"
+                      value={coordinatorSearch}
+                      onChange={(e) => setCoordinatorSearch(e.target.value)}
+                      placeholder="Search employee..."
+                      className="mb-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
                     />
+                    {coordinatorResults.length > 0 && (
+                      <div className="absolute z-10 w-full bg-white border border-gray-200 rounded-lg max-h-48 overflow-auto shadow">
+                        {coordinatorResults.map(emp => (
+                          <button
+                            key={emp.id}
+                            type="button"
+                            onClick={() => { setTenderForm({ ...tenderForm, project_coordinator_id: emp.id }); setCoordinatorSearch(emp.name); setCoordinatorResults([]); }}
+                            className="w-full text-left px-3 py-2 hover:bg-gray-100"
+                          >
+                            {emp.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                     {tenderForm.project_coordinator_id && (
-                      <p className="mt-1 text-xs text-green-700">Coordinator: {employees.find(emp => emp.id === tenderForm.project_coordinator_id)?.name}</p>
+                      <div className="mt-2">
+                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-green-50 text-green-700 border border-green-200 rounded">
+                          {employees.find(emp => emp.id === tenderForm.project_coordinator_id)?.name || coordinatorSearch}
+                        </span>
+                      </div>
                     )}
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Project Team (Salary Codes, comma separated)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Project Team (select multiple)</label>
                     <input
                       type="text"
-                      value={tenderForm.team_salary_codes}
-                      onChange={(e) => {
-                        const raw = e.target.value || '';
-                        const codes = raw.split(',').map(v => String(v).trim()).filter(Boolean);
-                        const ids = codes
-                          .map(code => {
-                            const emp = resolveEmployeeByCode(code);
-                            return emp ? emp.id : null;
-                          })
-                          .filter(id => id !== null);
-                        setTenderForm({
-                          ...tenderForm,
-                          team_salary_codes: raw,
-                          project_team_ids: ids
-                        });
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                      placeholder="e.g., SC001, SC002"
+                      value={teamSearch}
+                      onChange={(e) => setTeamSearch(e.target.value)}
+                      placeholder="Search team members..."
+                      className="mb-2 w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
                     />
+                    {teamResults.length > 0 && (
+                    <div className="w-full px-3 py-2 border border-gray-300 rounded-lg h-28 overflow-auto">
+                      {teamResults.map(emp => {
+                        const checked = (tenderForm.project_team_ids || []).includes(emp.id);
+                        return (
+                          <label key={emp.id} className="flex items-center gap-2 py-1">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(e) => {
+                                const next = new Set(tenderForm.project_team_ids || []);
+                                if (e.target.checked) next.add(emp.id); else next.delete(emp.id);
+                                setTenderForm({ ...tenderForm, project_team_ids: Array.from(next) });
+                              }}
+                            />
+                            <span>{emp.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    )}
                     {Array.isArray(tenderForm.project_team_ids) && tenderForm.project_team_ids.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-2">
                         {tenderForm.project_team_ids.map(id => (
@@ -778,65 +915,231 @@ const TendersView = ({ showNotification }) => {
                     )}
                   </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Description
-                  </label>
-                  <textarea
-                    value={tenderForm.description}
-                    onChange={(e) => setTenderForm({...tenderForm, description: e.target.value})}
-                    rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    placeholder="Detailed description of the tender..."
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Eligibility Criteria
-                  </label>
-                  <textarea
-                    value={tenderForm.eligibility_criteria}
-                    onChange={(e) => setTenderForm({...tenderForm, eligibility_criteria: e.target.value})}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    placeholder="Requirements and eligibility criteria..."
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Documents Required
-                  </label>
-                  <textarea
-                    value={tenderForm.documents_required}
-                    onChange={(e) => setTenderForm({...tenderForm, documents_required: e.target.value})}
-                    rows={3}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
-                    placeholder="List of required documents..."
-                  />
-                </div>
               </div>
 
-              <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
-                <button
-                  onClick={() => {
-                    setShowCreateModal(false);
-                    setShowEditModal(false);
-                    setSelectedTender(null);
-                    resetForm();
-                  }}
-                  className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={showCreateModal ? handleCreateTender : handleEditTender}
-                  className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
-                >
-                  {showCreateModal ? 'Create Tender' : 'Update Tender'}
-                </button>
+              {/* Description */}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Description
+                </label>
+                <textarea
+                  value={tenderForm.description}
+                  onChange={(e) => setTenderForm({...tenderForm, description: e.target.value})}
+                  rows={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus-border-transparent"
+                  placeholder="Detailed description of the tender..."
+                />
               </div>
+
+              {/* Removed: Eligibility Criteria and Documents Required */}
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6 pt-4 border-t">
+              <button
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setShowEditModal(false);
+                  setSelectedTender(null);
+                  resetForm();
+                }}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={showCreateModal ? handleCreateTender : handleEditTender}
+                className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+              >
+                {showCreateModal ? 'Create Tender' : 'Update Tender'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Extensions Modal */}
+      {showExtensionModal && selectedTender && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Manage Extensions - {selectedTender.tender_number}</h3>
+              <button onClick={() => setShowExtensionModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1 space-y-6">
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Add Extension</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <select value={extensionForm.date_field} onChange={(e)=>setExtensionForm({...extensionForm, date_field: e.target.value})} className="px-3 py-2 border rounded">
+                    <option value="published_date">Published Date</option>
+                    <option value="query_submission_date">Query Submission Date</option>
+                    <option value="appendix_ab_submission_date">Appendix A/B Submission Date</option>
+                    <option value="rfp_date">RFP Date</option>
+                    <option value="submission_deadline">Submission Deadline</option>
+                    <option value="rfq_date">RFQ Date</option>
+                    <option value="opening_date">Opening Date</option>
+                  </select>
+                  <input type="date" value={extensionForm.new_date} onChange={(e)=>setExtensionForm({...extensionForm, new_date: e.target.value})} className="px-3 py-2 border rounded"/>
+                  <input type="text" placeholder="Reason (optional)" value={extensionForm.reason} onChange={(e)=>setExtensionForm({...extensionForm, reason: e.target.value})} className="px-3 py-2 border rounded"/>
+                </div>
+                <div className="mt-3">
+                  <button onClick={submitExtension} className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Save Extension</button>
+                </div>
+              </div>
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Extension Log</h4>
+                <div className="border rounded">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Date Field</th>
+                        <th className="px-3 py-2 text-left">Old</th>
+                        <th className="px-3 py-2 text-left">New</th>
+                        <th className="px-3 py-2 text-left">Reason</th>
+                        <th className="px-3 py-2 text-left">When</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {extensionLogs.length === 0 && (
+                        <tr><td colSpan={5} className="px-3 py-3 text-center text-gray-500">No extensions yet</td></tr>
+                      )}
+                      {extensionLogs.map((log)=> (
+                        <tr key={log.id} className="border-t">
+                          <td className="px-3 py-2">{log.date_field}</td>
+                          <td className="px-3 py-2">{log.old_date ? new Date(log.old_date).toLocaleDateString() : '-'}</td>
+                          <td className="px-3 py-2">{log.new_date ? new Date(log.new_date).toLocaleDateString() : '-'}</td>
+                          <td className="px-3 py-2">{log.reason || '-'}</td>
+                          <td className="px-3 py-2">{log.created_at ? new Date(log.created_at).toLocaleString() : ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 bg-gray-50 flex justify-end">
+              <button onClick={()=>setShowExtensionModal(false)} className="px-4 py-2 bg-gray-200 rounded">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Assign to Vendor Modal */}
+      {showAssignModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-xl">
+            <div className="p-6 border-b flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900">Assign Tender to Vendor</h3>
+              <button onClick={() => setShowAssignModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Tender</label>
+                <select
+                  value={assignTenderId}
+                  onChange={(e) => setAssignTenderId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                >
+                  <option value="">-- Choose Tender --</option>
+                  {tenders.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.tender_number} - {t.tender_name || t.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Assignment Type</label>
+                <select
+                  value={assignmentType}
+                  onChange={(e) => setAssignmentType(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                >
+                  <option value="inhouse">In-house</option>
+                  <option value="outsourced">Outsourced</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Select Vendor</label>
+                <select
+                  value={assignVendorId}
+                  onChange={(e) => setAssignVendorId(e.target.value)}
+                  disabled={assignmentType === 'inhouse'}
+                  className={`w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent ${assignmentType === 'inhouse' ? 'bg-gray-100 cursor-not-allowed opacity-70' : ''}`}
+                >
+                  <option value="">-- Choose Vendor --</option>
+                  {vendors.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.company_name} {v.contact_person ? `- ${v.contact_person}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="p-6 bg-gray-50 flex justify-end gap-3 rounded-b-xl">
+              <button
+                onClick={() => setShowAssignModal(false)}
+                className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAssignVendor}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showProgressModal && progressTender && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-3xl">
+            <div className="p-6 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Tender Progress</h3>
+                <p className="text-sm text-gray-600 mt-1">{progressTender.tender_number} - {progressTender.tender_name || progressTender.title}</p>
+              </div>
+              <button onClick={() => setShowProgressModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X size={24} />
+              </button>
+            </div>
+            <div className="p-6">
+              {(() => {
+                const idx = computeStageIndex(progressTender);
+                const percent = computeProgressPercent(idx);
+                return (
+                  <div>
+                    <div className="mb-6">
+                      <div className="flex items-center justify-between text-sm font-medium text-gray-700 mb-2">
+                        <span>Overall Progress</span>
+                        <span>{percent}%</span>
+                      </div>
+                      <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
+                        <div className={`h-3 rounded-full ${idx === steps.length ? 'bg-green-500' : 'bg-blue-600'}`} style={{ width: `${percent}%` }} />
+                      </div>
+                    </div>
+                    <div className="relative">
+                      <div className="absolute top-1/2 left-6 right-6 -translate-y-1/2 border-t-2 border-dashed border-gray-300" />
+                      <ol className="relative z-10 grid grid-cols-1 md:grid-cols-6 gap-6">
+                        {steps.map((label, i) => {
+                          const stepIdx = i + 1;
+                          const active = stepIdx <= idx;
+                          return (
+                            <li key={label} className="flex flex-col items-center">
+                              <div className={`w-5 h-5 rounded-full border ${getStepClass(stepIdx, idx)}`} />
+                              <span className={`mt-2 text-center text-xs ${active ? 'text-gray-900' : 'text-gray-500'}`}>{label}</span>
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

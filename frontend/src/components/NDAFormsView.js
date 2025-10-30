@@ -22,6 +22,18 @@ const NDAFormsView = ({ showNotification }) => {
     loadForms();
   }, []);
 
+  // Listen for real-time submissions
+  useEffect(() => {
+    const handleDatabaseChange = (event) => {
+      const change = event.detail;
+      if (change && change.table === 'nda_forms') {
+        loadForms();
+      }
+    };
+    window.addEventListener('databaseChange', handleDatabaseChange);
+    return () => window.removeEventListener('databaseChange', handleDatabaseChange);
+  }, []);
+
   const loadForms = async () => {
     try {
       setLoading(true);
